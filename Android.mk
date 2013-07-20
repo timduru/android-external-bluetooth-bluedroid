@@ -9,6 +9,7 @@ else
   bdroid_C_INCLUDES :=
   bdroid_CFLAGS := -DHAS_NO_BDROID_BUILDCFG
 endif
+LOCAL_CFLAGS := -Wno-error=maybe-uninitialized -Wno-error=uninitialized -Wno-error=unused-parameter
 
 include $(call all-subdir-makefiles)
 

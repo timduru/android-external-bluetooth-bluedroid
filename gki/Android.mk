@@ -15,7 +15,8 @@ LOCAL_CFLAGS += -Werror $(bdroid_CFLAGS)
 
 ifeq ($(BOARD_HAVE_BLUETOOTH_BCM),true)
 LOCAL_CFLAGS += \
-	-DBOARD_HAVE_BLUETOOTH_BCM
+	-DBOARD_HAVE_BLUETOOTH_BCM \
+ 	-Wno-error=maybe-uninitialized -Wno-error=uninitialized -Wno-error=unused-parameter
 endif
 
 LOCAL_PRELINK_MODULE:=false
