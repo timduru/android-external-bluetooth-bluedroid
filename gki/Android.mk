@@ -19,6 +19,8 @@ LOCAL_CFLAGS += \
  	-Wno-error=maybe-uninitialized -Wno-error=uninitialized -Wno-error=unused-parameter
 endif
 
+LOCAL_CFLAGS += -fno-lto
+
 LOCAL_PRELINK_MODULE:=false
 LOCAL_SRC_FILES:= \
     ./ulinux/gki_ulinux.c \
