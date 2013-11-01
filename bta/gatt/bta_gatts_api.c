@@ -33,36 +33,43 @@
 #include "bta_gatts_int.h"
 
 /*****************************************************************************
-**  Externs
-*****************************************************************************/
-#if BTA_DYNAMIC_MEMORY == FALSE
-extern tBTA_GATTS_CB  bta_gatts_cb;
-#endif
-
-/*****************************************************************************
 **  Constants
 *****************************************************************************/
 
 static const tBTA_SYS_REG bta_gatts_reg =
 {
     bta_gatts_hdl_event,
-    NULL        /* need a disable functino to be called when BT is disabled */
+    BTA_GATTS_Disable
 };
 
 /*******************************************************************************
 **
-** Function         BTA_GATTS_Init
+** Function         BTA_GATTS_Disable
 **
-** Description     This function is called to initalize GATTS module
+** Description      This function is called to disable GATTS module
 **
-** Parameters       None
+** Parameters       None.
 **
 ** Returns          None
 **
 *******************************************************************************/
-void BTA_GATTS_Init()
+void BTA_GATTS_Disable(void)
 {
-    memset(&bta_gatts_cb, 0, sizeof(tBTA_GATTS_CB));
+    BT_HDR  *p_buf;
+
+    if (bta_sys_is_register(BTA_ID_GATTS) == FALSE)
+    {
+        APPL_TRACE_WARNING0("GATTS Module not enabled/already disabled");
+        return;
+    }
+
+    if ((p_buf = (BT_HDR *) GKI_getbuf(sizeof(BT_HDR))) != NULL)
+    {
+        p_buf->event = BTA_GATTS_API_DISABLE_EVT;
+        bta_sys_sendmsg(p_buf);
+    }
+    bta_sys_deregister(BTA_ID_GATTS);
+
 }
 
 /*******************************************************************************
@@ -83,12 +90,12 @@ void BTA_GATTS_AppRegister(tBT_UUID *p_app_uuid, tBTA_GATTS_CBACK *p_cback)
     tBTA_GATTS_API_REG  *p_buf;
 
     /* register with BTA system manager */
-    GKI_sched_lock();
-    if (!bta_gatts_cb.enabled)
-    {
+   if (bta_sys_is_register(BTA_ID_GATTS) == FALSE)
+   {
+        GKI_sched_lock();
         bta_sys_register(BTA_ID_GATTS, &bta_gatts_reg);
+        GKI_sched_unlock();
     }
-    GKI_sched_unlock();
 
     if ((p_buf = (tBTA_GATTS_API_REG *) GKI_getbuf(sizeof(tBTA_GATTS_API_REG))) != NULL)
     {
@@ -530,6 +537,44 @@ void BTA_GATTS_Close(UINT16 conn_id)
     }
     return;
 
+}
+/*******************************************************************************
+**
+** Function         BTA_GATTS_Listen
+**
+** Description      Start advertisement to listen for connection request for a
+**                  GATT server
+**
+** Parameters       server_if: server interface.
+**                  start: to start or stop listening for connection
+**                  remote_bda: remote device BD address, if listen to all device
+**                              use NULL.
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_GATTS_Listen(tBTA_GATTS_IF server_if, BOOLEAN start, BD_ADDR_PTR target_bda)
+{
+    tBTA_GATTS_API_LISTEN  *p_buf;
+
+    if ((p_buf = (tBTA_GATTS_API_LISTEN *) GKI_getbuf((UINT16)(sizeof(tBTA_GATTS_API_LISTEN) + BD_ADDR_LEN))) != NULL)
+    {
+        p_buf->hdr.event = BTA_GATTS_API_LISTEN_EVT;
+
+        p_buf->server_if    = server_if;
+        p_buf->start        = start;
+
+        if (target_bda)
+        {
+            p_buf->remote_bda = (UINT8*)(p_buf + 1);
+            memcpy(p_buf->remote_bda, target_bda, BD_ADDR_LEN);
+        }
+        else
+            p_buf->remote_bda = NULL;
+
+        bta_sys_sendmsg(p_buf);
+    }
+    return;
 }
 
 #endif /* BTA_GATT_INCLUDED */

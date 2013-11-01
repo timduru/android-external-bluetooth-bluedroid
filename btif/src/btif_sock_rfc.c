@@ -867,7 +867,10 @@ static BOOLEAN flush_incoming_que_on_wr_signal(rfc_slot_t* rs)
 
     //app is ready to receive data, tell stack to start the data flow
     //fix me: need a jv flow control api to serialize the call in stack
-    PORT_FlowControl(rs->rfc_port_handle, TRUE);
+    APPL_TRACE_DEBUG3("enable data flow, rfc_handle:0x%x, rfc_port_handle:0x%x, user_id:%d",
+                        rs->rfc_handle, rs->rfc_port_handle, rs->id);
+    extern int PORT_FlowControl_MaxCredit(UINT16 handle, BOOLEAN enable);
+    PORT_FlowControl_MaxCredit(rs->rfc_port_handle, TRUE);
     return TRUE;
 }
 void btsock_rfc_signaled(int fd, int flags, uint32_t user_id)
@@ -936,25 +939,29 @@ int bta_co_rfc_data_incoming(void *user_data, BT_HDR *p_buf)
     rfc_slot_t* rs = find_rfc_slot_by_id(id);
     if(rs)
     {
-
-        int sent = send_data_to_app(rs->fd, p_buf);
-        switch(sent)
+        if(!GKI_queue_is_empty(&rs->incoming_que))
+            GKI_enqueue(&rs->incoming_que, p_buf);
+        else
         {
-            case SENT_NONE:
-            case SENT_PARTIAL:
-                //add it to the end of the queue
-                GKI_enqueue(&rs->incoming_que, p_buf);
-                //monitor the fd to get callback when app is ready to receive data
-                btsock_thread_add_fd(pth, rs->fd, BTSOCK_RFCOMM, SOCK_THREAD_FD_WR, rs->id);
-                break;
-            case SENT_ALL:
-                GKI_freebuf(p_buf);
-                ret = 1;//enable the data flow
-                break;
-            case SENT_FAILED:
-                GKI_freebuf(p_buf);
-                cleanup_rfc_slot(rs);
-                break;
+            int sent = send_data_to_app(rs->fd, p_buf);
+            switch(sent)
+            {
+                case SENT_NONE:
+                case SENT_PARTIAL:
+                    //add it to the end of the queue
+                    GKI_enqueue(&rs->incoming_que, p_buf);
+                    //monitor the fd to get callback when app is ready to receive data
+                    btsock_thread_add_fd(pth, rs->fd, BTSOCK_RFCOMM, SOCK_THREAD_FD_WR, rs->id);
+                    break;
+                case SENT_ALL:
+                    GKI_freebuf(p_buf);
+                    ret = 1;//enable the data flow
+                    break;
+                case SENT_FAILED:
+                    GKI_freebuf(p_buf);
+                    cleanup_rfc_slot(rs);
+                    break;
+            }
         }
      }
     unlock_slot(&slot_lock);

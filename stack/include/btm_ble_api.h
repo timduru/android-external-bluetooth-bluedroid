@@ -863,6 +863,29 @@ void BTM_BleTransmitterTest(UINT8 tx_freq, UINT8 test_data_len,
 **
 *******************************************************************************/
 void BTM_BleTestEnd(tBTM_CMPL_CB *p_cmd_cmpl_cback);
+
+/*******************************************************************************
+**
+** Function         BTM_IsBleLink
+**
+** Description      This function is to check the link type is BLE or BR/EDR.
+**
+** Returns          TRUE if BLE link; FALSE if BR/EDR.
+**
+*******************************************************************************/
+BTM_API extern BOOLEAN BTM_IsBleLink (BD_ADDR bd_addr);
+
+/*******************************************************************************
+**
+** Function         BTM_UseLeLink
+**
+** Description      This function is to select the underneath physical link to use.
+**
+** Returns          TRUE to use LE, FALSE use BR/EDR.
+**
+*******************************************************************************/
+BTM_API extern BOOLEAN BTM_UseLeLink (BD_ADDR bd_addr);
+
 #ifdef __cplusplus
 }
 #endif

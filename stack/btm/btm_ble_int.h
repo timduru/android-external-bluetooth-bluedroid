@@ -190,12 +190,22 @@ typedef UINT8 tBTM_BLE_WL_STATE;
 #define BLE_CONN_IDLE    0
 #define BLE_DIR_CONN     1
 #define BLE_BG_CONN      2
+#define BLE_CONN_CANCEL  3
 typedef UINT8 tBTM_BLE_CONN_ST;
 
 typedef struct
 {
     void    *p_param;
 }tBTM_BLE_CONN_REQ;
+
+
+typedef struct
+{
+    BOOLEAN     in_use;
+    BOOLEAN     to_add;
+    BD_ADDR     bd_addr;
+    UINT8       attr;
+}tBTM_BLE_WL_OP;
 /* Define BLE Device Management control structure
 */
 typedef struct
@@ -226,12 +236,12 @@ typedef struct
     tBTM_LE_RANDOM_CB   addr_mgnt_cb;
 
     BOOLEAN          enabled;
+    tBTM_BLE_WL_OP  wl_op_q[BTM_BLE_MAX_BG_CONN_DEV_NUM];
 
 #ifdef BTM_BLE_PC_ADV_TEST_MODE
     tBTM_BLE_SCAN_REQ_CBACK *p_scan_req_cback;
 #endif
 
-    BOOLEAN         scatternet_enable;
 } tBTM_BLE_CB;
 
 #ifdef __cplusplus
@@ -277,7 +287,6 @@ extern void btm_ble_reset_id( void );
 /* security related functions */
 extern void btm_ble_increment_sign_ctr(BD_ADDR bd_addr, BOOLEAN is_local );
 extern BOOLEAN btm_get_local_div (BD_ADDR bd_addr, UINT16 *p_div);
-extern BOOLEAN btm_ble_check_link_type (BD_ADDR bd_addr);
 extern BOOLEAN btm_ble_get_enc_key_type(BD_ADDR bd_addr, UINT8 *p_key_types);
 
 extern void btm_ble_rand_enc_complete (UINT8 *p, UINT16 op_code, tBTM_RAND_ENC_CB *p_enc_cplt_cback);

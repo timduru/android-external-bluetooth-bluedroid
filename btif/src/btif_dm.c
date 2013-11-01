@@ -64,6 +64,18 @@
 #define BTIF_DM_DEFAULT_INQ_MAX_DURATION    10
 #define BTIF_DM_MAX_SDP_ATTEMPTS_AFTER_PAIRING 2
 
+#define PROPERTY_PRODUCT_MODEL "ro.product.model"
+#define DEFAULT_LOCAL_NAME_MAX  31
+#if (DEFAULT_LOCAL_NAME_MAX > BTM_MAX_LOC_BD_NAME_LEN)
+    #error "default btif local name size exceeds stack supported length"
+#endif
+
+#if (defined(BTA_HOST_INTERLEAVE_SEARCH) && BTA_HOST_INTERLEAVE_SEARCH == TRUE)
+#define BTIF_DM_INTERLEAVE_DURATION_BR_ONE    2
+#define BTIF_DM_INTERLEAVE_DURATION_LE_ONE    2
+#define BTIF_DM_INTERLEAVE_DURATION_BR_TWO    3
+#define BTIF_DM_INTERLEAVE_DURATION_LE_TWO    4
+#endif
 
 typedef struct
 {
@@ -115,6 +127,11 @@ typedef struct
 /* This flag will be true if HCI_Inquiry is in progress */
 static BOOLEAN btif_dm_inquiry_in_progress = FALSE;
 
+/************************************************************************************
+**  Static variables
+************************************************************************************/
+static char btif_default_local_name[DEFAULT_LOCAL_NAME_MAX+1] = {'\0'};
+
 /******************************************************************************
 **  Static functions
 ******************************************************************************/
@@ -131,6 +148,7 @@ static void btif_dm_ble_key_notif_evt(tBTA_DM_SP_KEY_NOTIF *p_ssp_key_notif);
 static void btif_dm_ble_auth_cmpl_evt (tBTA_DM_AUTH_CMPL *p_auth_cmpl);
 static void btif_dm_ble_passkey_req_evt(tBTA_DM_PIN_REQ *p_pin_req);
 #endif
+static char* btif_get_default_local_name();
 /******************************************************************************
 **  Externs
 ******************************************************************************/
@@ -139,6 +157,7 @@ extern bt_status_t btif_hf_execute_service(BOOLEAN b_enable);
 extern bt_status_t btif_av_execute_service(BOOLEAN b_enable);
 extern bt_status_t btif_hh_execute_service(BOOLEAN b_enable);
 extern int btif_hh_connect(bt_bdaddr_t *bd_addr);
+extern void bta_gatt_convert_uuid16_to_uuid128(UINT8 uuid_128[LEN_UUID_128], UINT16 uuid_16);
 
 
 /******************************************************************************
@@ -285,7 +304,28 @@ BOOLEAN check_cod_hid(const bt_bdaddr_t *remote_bdaddr, uint32_t cod)
         if ((remote_cod & 0x700) == cod)
             return TRUE;
     }
+    return FALSE;
+}
 
+BOOLEAN check_hid_le(const bt_bdaddr_t *remote_bdaddr)
+{
+    uint32_t    remote_dev_type;
+    bt_property_t prop_name;
+
+    /* check if we already have it in our btif_storage cache */
+    BTIF_STORAGE_FILL_PROPERTY(&prop_name,BT_PROPERTY_TYPE_OF_DEVICE,
+                               sizeof(uint32_t), &remote_dev_type);
+    if (btif_storage_get_remote_device_property((bt_bdaddr_t *)remote_bdaddr,
+                                &prop_name) == BT_STATUS_SUCCESS)
+    {
+        if (remote_dev_type == BT_DEVICE_DEVTYPE_BLE)
+        {
+            bdstr_t bdstr;
+            bd2str(remote_bdaddr, &bdstr);
+            if(btif_config_exist("Remote", bdstr, "HidAppId"))
+                return TRUE;
+        }
+    }
     return FALSE;
 }
 
@@ -443,16 +483,6 @@ static void btif_dm_cb_hid_remote_name(tBTM_REMOTE_DEV_NAME *p_remote_name)
     }
 }
 
-int remove_hid_bond(bt_bdaddr_t *bd_addr)
-{
-    /* For HID device, inorder to avoid the HID device from re-connecting again after unpairing,
-         * we need to do virtual unplug
-         */
-    bdstr_t bdstr;
-    BTIF_TRACE_DEBUG2("%s---Removing HID bond--%s", __FUNCTION__,bd2str((bt_bdaddr_t *)bd_addr, &bdstr));
-    return btif_hh_virtual_unplug(bd_addr);
-
-}
 /*******************************************************************************
 **
 ** Function         btif_dm_cb_create_bond
@@ -512,23 +542,13 @@ void btif_dm_cb_remove_bond(bt_bdaddr_t *bd_addr)
 {
      bdstr_t bdstr;
      /*special handling for HID devices */
-     if (check_cod_hid(bd_addr, COD_HID_MAJOR))
+     /*  VUP needs to be sent if its a HID Device. The HID HOST module will check if there
+     is a valid hid connection with this bd_addr. If yes VUP will be issued.*/
+#if (defined(BTA_HH_INCLUDED) && (BTA_HH_INCLUDED == TRUE))
+    if (btif_hh_virtual_unplug(bd_addr) != BT_STATUS_SUCCESS)
+#endif
     {
-        #if (defined(BTA_HH_INCLUDED) && (BTA_HH_INCLUDED == TRUE))
-        if(remove_hid_bond(bd_addr) != BTA_SUCCESS)
-            BTA_DmRemoveDevice((UINT8 *)bd_addr->address);
-        #endif
-    }
-    else
-    {
-        if (BTA_DmRemoveDevice((UINT8 *)bd_addr->address) == BTA_SUCCESS)
-        {
-            BTIF_TRACE_DEBUG1("Successfully removed bonding with device: %s",
-                                            bd2str((bt_bdaddr_t *)bd_addr, &bdstr));
-        }
-        else
-            BTIF_TRACE_DEBUG1("Removed bonding with device failed: %s",
-                                            bd2str((bt_bdaddr_t *)bd_addr, &bdstr));
+         BTA_DmRemoveDevice((UINT8 *)bd_addr->address);
     }
 }
 
@@ -981,6 +1001,7 @@ static void btif_dm_search_devices_evt (UINT16 event, char *p_param)
             {
                 bt_property_t properties[5];
                 bt_device_type_t dev_type;
+                UINT8 addr_type;
                 uint32_t num_properties = 0;
                 bt_status_t status;
 
@@ -991,7 +1012,8 @@ static void btif_dm_search_devices_evt (UINT16 event, char *p_param)
                 num_properties++;
                 /* BD_NAME */
                 /* Don't send BDNAME if it is empty */
-                if (bdname.name[0]) {
+                if (bdname.name[0])
+                {
                     BTIF_STORAGE_FILL_PROPERTY(&properties[num_properties],
                                                BT_PROPERTY_BDNAME,
                                                strlen((char *)bdname.name), &bdname);
@@ -1003,9 +1025,10 @@ static void btif_dm_search_devices_evt (UINT16 event, char *p_param)
                                     BT_PROPERTY_CLASS_OF_DEVICE, sizeof(cod), &cod);
                 num_properties++;
                 /* DEV_TYPE */
-#if (BLE_INCLUDED == TRUE)
+#if (defined(BLE_INCLUDED) && (BLE_INCLUDED == TRUE))
                 /* FixMe: Assumption is that bluetooth.h and BTE enums match */
                 dev_type = p_search_data->inq_res.device_type;
+                addr_type = p_search_data->inq_res.ble_addr_type;
 #else
                 dev_type = BT_DEVICE_TYPE_BREDR;
 #endif
@@ -1020,7 +1043,10 @@ static void btif_dm_search_devices_evt (UINT16 event, char *p_param)
 
                 status = btif_storage_add_remote_device(&bdaddr, num_properties, properties);
                 ASSERTC(status == BT_STATUS_SUCCESS, "failed to save remote device (inquiry)", status);
-
+#if (defined(BLE_INCLUDED) && (BLE_INCLUDED == TRUE))
+                status = btif_storage_set_remote_addr_type(&bdaddr, addr_type);
+                ASSERTC(status == BT_STATUS_SUCCESS, "failed to save remote addr type (inquiry)", status);
+#endif
                 /* Callback to notify upper layer of device */
                 HAL_CBACK(bt_hal_cbacks, device_found_cb,
                                  num_properties, properties);
@@ -1120,18 +1146,62 @@ static void btif_dm_search_services_evt(UINT16 event, char *p_param)
                  bond_state_changed(BT_STATUS_SUCCESS, &bd_addr, BT_BOND_STATE_BONDED);
             }
 
-            /* Also write this to the NVRAM */
-            ret = btif_storage_set_remote_device_property(&bd_addr, &prop);
-            ASSERTC(ret == BT_STATUS_SUCCESS, "storing remote services failed", ret);
-            /* Send the event to the BTIF */
-            HAL_CBACK(bt_hal_cbacks, remote_device_properties_cb,
-                             BT_STATUS_SUCCESS, &bd_addr, 1, &prop);
+            if(p_data->disc_res.num_uuids != 0)
+            {
+                /* Also write this to the NVRAM */
+                ret = btif_storage_set_remote_device_property(&bd_addr, &prop);
+                ASSERTC(ret == BT_STATUS_SUCCESS, "storing remote services failed", ret);
+                /* Send the event to the BTIF */
+                HAL_CBACK(bt_hal_cbacks, remote_device_properties_cb,
+                                 BT_STATUS_SUCCESS, &bd_addr, 1, &prop);
+            }
         }
         break;
 
         case BTA_DM_DISC_CMPL_EVT:
             /* fixme */
         break;
+
+#if (defined(BLE_INCLUDED) && (BLE_INCLUDED == TRUE))
+        case BTA_DM_DISC_BLE_RES_EVT:
+             BTIF_TRACE_DEBUG2("%s:, services 0x%x)", __FUNCTION__,
+                                p_data->disc_ble_res.service.uu.uuid16);
+             bt_uuid_t  uuid;
+             int i = 0;
+             int j = 15;
+             if (p_data->disc_ble_res.service.uu.uuid16 == UUID_SERVCLASS_LE_HID)
+             {
+                BTIF_TRACE_DEBUG1("%s: Found HOGP UUID",__FUNCTION__);
+                bt_property_t prop;
+                bt_bdaddr_t bd_addr;
+                char temp[256];
+
+                bta_gatt_convert_uuid16_to_uuid128(uuid.uu,p_data->disc_ble_res.service.uu.uuid16);
+
+                while(i < j )
+                {
+                    unsigned char c = uuid.uu[j];
+                    uuid.uu[j] = uuid.uu[i];
+                    uuid.uu[i] = c;
+                    i++;
+                    j--;
+                }
+
+                uuid_to_string(&uuid, temp);
+                BTIF_TRACE_ERROR1(" uuid:%s", temp);
+
+                bdcpy(bd_addr.address, p_data->disc_ble_res.bd_addr);
+                prop.type = BT_PROPERTY_UUIDS;
+                prop.val = uuid.uu;
+                prop.len = MAX_UUID_SIZE;
+
+                /* Send the event to the BTIF */
+                HAL_CBACK(bt_hal_cbacks, remote_device_properties_cb,
+                                 BT_STATUS_SUCCESS, &bd_addr, 1, &prop);
+
+            }
+        break;
+#endif /* BLE_INCLUDED */
 
         default:
         {
@@ -1224,18 +1294,17 @@ static void btif_dm_upstreams_evt(UINT16 event, char* p_param)
              prop.val = (void*)bdname;
 
              status = btif_storage_get_adapter_property(&prop);
-             /* Storage does not have a name yet.
-             ** Use the default name and write it to the chip
-             */
-             if (status != BT_STATUS_SUCCESS)
-             {
-                 BTA_DmSetDeviceName((char *)BTM_DEF_LOCAL_NAME);
-                 /* Hmmm...Should we store this too??? */
-             }
-             else
+             if (status == BT_STATUS_SUCCESS)
              {
                  /* A name exists in the storage. Make this the device name */
                  BTA_DmSetDeviceName((char*)prop.val);
+             }
+             else
+             {
+                 /* Storage does not have a name yet.
+                  * Use the default name and write it to the chip
+                  */
+                 BTA_DmSetDeviceName(btif_get_default_local_name());
              }
 
              /* for each of the enabled services in the mask, trigger the profile
@@ -1306,10 +1375,10 @@ static void btif_dm_upstreams_evt(UINT16 event, char* p_param)
 
             /*special handling for HID devices */
             #if (defined(BTA_HH_INCLUDED) && (BTA_HH_INCLUDED == TRUE))
-            if (check_cod_hid(&bd_addr, COD_HID_MAJOR))
-            {
-                btif_hh_remove_device(bd_addr);
-            }
+            btif_hh_remove_device(bd_addr);
+            #endif
+            #if (defined(BLE_INCLUDED) && (BLE_INCLUDED == TRUE))
+            btif_storage_remove_ble_bonding_keys(&bd_addr);
             #endif
             btif_storage_remove_bonded_device(&bd_addr);
             bond_state_changed(BT_STATUS_SUCCESS, &bd_addr, BT_BOND_STATE_NONE);
@@ -1730,6 +1799,12 @@ bt_status_t btif_dm_start_discovery(void)
     /* Set inquiry params and call API */
 #if (defined(BLE_INCLUDED) && (BLE_INCLUDED == TRUE))
     inq_params.mode = BTA_DM_GENERAL_INQUIRY|BTA_BLE_GENERAL_INQUIRY;
+#if (defined(BTA_HOST_INTERLEAVE_SEARCH) && BTA_HOST_INTERLEAVE_SEARCH == TRUE)
+    inq_params.intl_duration[0]= BTIF_DM_INTERLEAVE_DURATION_BR_ONE;
+    inq_params.intl_duration[1]= BTIF_DM_INTERLEAVE_DURATION_LE_ONE;
+    inq_params.intl_duration[2]= BTIF_DM_INTERLEAVE_DURATION_BR_TWO;
+    inq_params.intl_duration[3]= BTIF_DM_INTERLEAVE_DURATION_LE_TWO;
+#endif
 #else
     inq_params.mode = BTA_DM_GENERAL_INQUIRY;
 #endif
@@ -1981,7 +2056,7 @@ bt_status_t btif_dm_get_adapter_property(bt_property_t *prop)
         case BT_PROPERTY_BDNAME:
         {
             bt_bdname_t *bd_name = (bt_bdname_t*)prop->val;
-            strcpy((char *)bd_name->name, (char *)BTM_DEF_LOCAL_NAME);
+            strcpy((char *)bd_name->name, btif_get_default_local_name());
             prop->len = strlen((char *)bd_name->name);
         }
         break;
@@ -2529,4 +2604,23 @@ void btif_dm_on_disable()
         bdcpy(bd_addr.address, pairing_cb.bd_addr);
         btif_dm_cancel_bond(&bd_addr);
     }
+}
+
+static char* btif_get_default_local_name() {
+    if (btif_default_local_name[0] == '\0')
+    {
+        int max_len = sizeof(btif_default_local_name) - 1;
+        if (BTM_DEF_LOCAL_NAME[0] != '\0')
+        {
+            strncpy(btif_default_local_name, BTM_DEF_LOCAL_NAME, max_len);
+        }
+        else
+        {
+            char prop_model[PROPERTY_VALUE_MAX];
+            property_get(PROPERTY_PRODUCT_MODEL, prop_model, "");
+            strncpy(btif_default_local_name, prop_model, max_len);
+        }
+        btif_default_local_name[max_len] = '\0';
+    }
+    return btif_default_local_name;
 }

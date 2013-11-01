@@ -33,7 +33,7 @@
 #include "bta_sys.h"
 #include "bta_gatts_int.h"
 #include "bta_gatts_co.h"
-
+#include "btm_ble_api.h"
 #include <string.h>
 
 static void bta_gatts_nv_save_cback(BOOLEAN is_saved, tGATTS_HNDL_RANGE *p_hndl_range);
@@ -105,24 +105,66 @@ void bta_gatts_enable(tBTA_GATTS_CB *p_cb)
 {
     UINT8 index=0;
     tBTA_GATTS_HNDL_RANGE handle_range;
+    tBTA_GATT_STATUS    status = BTA_GATT_OK;
 
-    p_cb->enabled = TRUE;
-
-    APPL_TRACE_DEBUG0("bta_gatts_enable");
-    while ( bta_gatts_co_load_handle_range(index, &handle_range))
+    if (p_cb->enabled)
     {
-        GATTS_AddHandleRange((tGATTS_HNDL_RANGE *)&handle_range);
-        memset(&handle_range, 0, sizeof(tGATTS_HNDL_RANGE));
-        index++;
+        APPL_TRACE_DEBUG0("GATTS already enabled.");
     }
-
-    APPL_TRACE_DEBUG1("bta_gatts_enable: num of handle range added=%d", index);
-
-    if (!GATTS_NVRegister(&bta_gatts_nv_cback))
+    else
     {
-        APPL_TRACE_ERROR0("BTA GATTS NV register failed.");
+        memset(p_cb, 0, sizeof(tBTA_GATTS_CB));
+
+        p_cb->enabled = TRUE;
+
+        while ( bta_gatts_co_load_handle_range(index, &handle_range))
+        {
+            GATTS_AddHandleRange((tGATTS_HNDL_RANGE *)&handle_range);
+            memset(&handle_range, 0, sizeof(tGATTS_HNDL_RANGE));
+            index++;
+        }
+
+        APPL_TRACE_DEBUG1("bta_gatts_enable: num of handle range added=%d", index);
+
+        if (!GATTS_NVRegister(&bta_gatts_nv_cback))
+        {
+            APPL_TRACE_ERROR0("BTA GATTS NV register failed.");
+            status = BTA_GATT_ERROR;
+        }
     }
 }
+
+/*******************************************************************************
+**
+** Function         bta_gatts_api_disable
+**
+** Description      disable BTA GATTS module.
+**
+** Returns          none.
+**
+*******************************************************************************/
+void bta_gatts_api_disable(tBTA_GATTS_CB *p_cb)
+{
+    UINT8 i;
+    tBTA_GATT_STATUS    status = BTA_GATT_OK;
+
+    if (p_cb->enabled)
+    {
+        for (i = 0; i < BTA_GATTS_MAX_APP_NUM; i ++)
+        {
+            if (p_cb->rcb[i].in_use)
+            {
+                GATT_Deregister(p_cb->rcb[i].gatt_if);
+            }
+        }
+        memset(p_cb, 0, sizeof(tBTA_GATTS_CB));
+    }
+    else
+    {
+        APPL_TRACE_ERROR0("GATTS not enabled");
+    }
+}
+
 /*******************************************************************************
 **
 ** Function         bta_gatts_register
@@ -139,9 +181,10 @@ void bta_gatts_register(tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA *p_msg)
     tBTA_GATT_STATUS         status = BTA_GATT_OK;
     UINT8                    i, first_unuse = 0xff;
 
-    if (!p_cb->enabled)
+    if (p_cb->enabled == FALSE)
+    {
         bta_gatts_enable(p_cb);
-
+    }
 
     for (i = 0; i < BTA_GATTS_MAX_APP_NUM; i ++)
     {
@@ -567,9 +610,13 @@ void bta_gatts_send_rsp (tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA * p_msg)
 }
 /*******************************************************************************
 **
-** Function         bta_gatts_send_rsp
+** Function         bta_gatts_indicate_handle
 **
-** Description      GATTS send response.
+<<<<<<< HEAD
+** Description      GATTS indicate handel value
+=======
+** Description      GATTS send handle value indication or notification.
+>>>>>>> 6ea30bf... LE: UPF 45 bug fixes
 **
 ** Returns          none.
 **
@@ -577,27 +624,43 @@ void bta_gatts_send_rsp (tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA * p_msg)
 void bta_gatts_indicate_handle (tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA * p_msg)
 {
     tBTA_GATTS_SRVC_CB  *p_srvc_cb;
-    tBTA_GATT_STATUS    status;
+    tBTA_GATT_STATUS    status = BTA_GATT_ILLEGAL_PARAMETER;
+    tGATT_IF            gatt_if;
+    BD_ADDR             remote_bda;
 
 
     p_srvc_cb = bta_gatts_find_srvc_cb_by_attr_id (p_cb, p_msg->api_indicate.attr_id);
 
     if (p_srvc_cb )
     {
-        if (p_msg->api_indicate.need_confirm)
+        if (GATT_GetConnectionInfor(p_msg->api_indicate.hdr.layer_specific, &gatt_if, remote_bda))
+        {
+            if (p_msg->api_indicate.need_confirm)
 
-            status = GATTS_HandleValueIndication (p_msg->api_indicate.hdr.layer_specific,
-                                                  p_msg->api_indicate.attr_id,
-                                                  p_msg->api_indicate.len,
-                                                  p_msg->api_indicate.value);
+                status = GATTS_HandleValueIndication (p_msg->api_indicate.hdr.layer_specific,
+                                                      p_msg->api_indicate.attr_id,
+                                                      p_msg->api_indicate.len,
+                                                      p_msg->api_indicate.value);
+            else
+                status = GATTS_HandleValueNotification (p_msg->api_indicate.hdr.layer_specific,
+                                                        p_msg->api_indicate.attr_id,
+                                                        p_msg->api_indicate.len,
+                                                        p_msg->api_indicate.value);
+
+            /* if over BR_EDR, inform PM for mode change */
+            if (!BTM_IsBleLink(remote_bda))
+            {
+                bta_sys_busy(BTA_ID_GATTS, BTA_ALL_APP_ID, remote_bda);
+                bta_sys_idle(BTA_ID_GATTS, BTA_ALL_APP_ID, remote_bda);
+            }
+        }
         else
-            status = GATTS_HandleValueNotification (p_msg->api_indicate.hdr.layer_specific,
-                                                    p_msg->api_indicate.attr_id,
-                                                    p_msg->api_indicate.len,
-                                                    p_msg->api_indicate.value);
+        {
+            APPL_TRACE_ERROR1("Unknown connection ID: %d fail sending notification",
+                              p_msg->api_indicate.hdr.layer_specific);
+        }
 
-        if (status != GATT_SUCCESS &&
-            p_msg->api_indicate.need_confirm &&
+        if (status != GATT_SUCCESS && p_msg->api_indicate.need_confirm &&
             p_cb->rcb[p_srvc_cb->rcb_idx].p_cback)
         {
             (*p_cb->rcb[p_srvc_cb->rcb_idx].p_cback)(BTA_GATTS_CONF_EVT, (tBTA_GATTS *)&status);
@@ -605,7 +668,8 @@ void bta_gatts_indicate_handle (tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA * p_msg)
     }
     else
     {
-        APPL_TRACE_ERROR1("Not an registered servce attribute ID: 0x%04x", p_msg->api_indicate.attr_id);
+        APPL_TRACE_ERROR1("Not an registered servce attribute ID: 0x%04x",
+                          p_msg->api_indicate.attr_id);
     }
 }
 
@@ -704,13 +768,51 @@ void bta_gatts_close (tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA * p_msg)
         p_rcb = bta_gatts_find_app_rcb_by_app_if(gatt_if);
 
         if (p_rcb && p_rcb->p_cback)
+        {
+            if (!BTM_IsBleLink(remote_bda))
+                bta_sys_conn_close( BTA_ID_GATTS ,BTA_ALL_APP_ID, remote_bda);
+
             (*p_rcb->p_cback)(BTA_GATTS_CLOSE_EVT,  (tBTA_GATTS *)&status);
+        }
     }
     else
     {
         APPL_TRACE_ERROR1("Unknown connection ID: %d", p_msg->hdr.layer_specific);
     }
 
+}
+/*******************************************************************************
+**
+** Function         bta_gatts_listen
+**
+** Description      Start or stop listening for LE connection on a GATT server
+**
+** Returns          none.
+**
+*******************************************************************************/
+void bta_gatts_listen(tBTA_GATTS_CB *p_cb, tBTA_GATTS_DATA * p_msg)
+{
+    tBTA_GATTS_RCB     *p_rcb = bta_gatts_find_app_rcb_by_app_if(p_msg->api_listen.server_if);
+    tBTA_GATTS          cb_data;
+    cb_data.reg_oper.status = BTA_GATT_OK;
+    cb_data.reg_oper.server_if = p_msg->api_listen.server_if;
+
+    if (p_rcb == NULL)
+    {
+        APPL_TRACE_ERROR0("Unknown GATTS application");
+        return;
+    }
+
+    if (!GATT_Listen(p_msg->api_listen.server_if,
+                     p_msg->api_listen.start,
+                     p_msg->api_listen.remote_bda))
+    {
+        cb_data.status = BTA_GATT_ERROR;
+        APPL_TRACE_ERROR0("bta_gatts_listen Listen failed");
+    }
+
+    if (p_rcb->p_cback)
+        (*p_rcb->p_cback)(BTA_GATTS_LISTEN_EVT, &cb_data);
 }
 
 /*******************************************************************************
@@ -740,6 +842,13 @@ static void bta_gatts_send_request_cback (UINT16 conn_id,
 
         if (p_rcb && p_rcb->p_cback)
         {
+            /* if over BR_EDR, inform PM for mode change */
+            if (!BTM_IsBleLink(cb_data.req_data.remote_bda))
+            {
+                bta_sys_busy(BTA_ID_GATTS, BTA_ALL_APP_ID, cb_data.req_data.remote_bda);
+                bta_sys_idle(BTA_ID_GATTS, BTA_ALL_APP_ID, cb_data.req_data.remote_bda);
+            }
+
             cb_data.req_data.conn_id    = conn_id;
             cb_data.req_data.trans_id   = trans_id;
             cb_data.req_data.p_data     = (tBTA_GATTS_REQ_DATA *)p_data;
@@ -782,6 +891,15 @@ static void bta_gatts_conn_cback (tGATT_IF gatt_if, BD_ADDR bda, UINT16 conn_id,
 
     if (p_reg && p_reg->p_cback)
     {
+        /* there is no RM for GATT */
+        if (!BTM_IsBleLink(bda))
+        {
+            if (connected)
+                bta_sys_conn_open(BTA_ID_GATTS, BTA_ALL_APP_ID, bda);
+            else
+                bta_sys_conn_close( BTA_ID_GATTS ,BTA_ALL_APP_ID, bda);
+        }
+
         cb_data.conn.conn_id = conn_id;
         cb_data.conn.server_if = gatt_if;
         cb_data.conn.reason = reason;

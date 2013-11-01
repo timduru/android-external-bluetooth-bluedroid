@@ -177,6 +177,7 @@ typedef UINT8 tBTA_SEC;
 
 #define BTA_DM_IGNORE           0xFF
 
+#define BTA_ALL_APP_ID          0xFF
 
 /* Discoverable Modes */
 #define BTA_DM_NON_DISC         BTM_NON_DISCOVERABLE        /* Device is not discoverable. */
@@ -282,6 +283,9 @@ typedef struct
     BOOLEAN             report_dup;     /* report duplicated inquiry response with higher RSSI value */
     tBTA_DM_INQ_FILT    filter_type;    /* Filter condition type. */
     tBTA_DM_INQ_COND    filter_cond;    /* Filter condition data. */
+#if (defined(BTA_HOST_INTERLEAVE_SEARCH) && BTA_HOST_INTERLEAVE_SEARCH == TRUE)
+    UINT8               intl_duration[4];/*duration array storing the interleave scan's time portions*/
+#endif
 } tBTA_DM_INQ;
 
 typedef struct
@@ -1764,6 +1768,23 @@ BTA_API extern void BTA_DmSetBlePrefConnParams(BD_ADDR bd_addr,
 BTA_API extern void BTA_DmSetBleConnScanParams(UINT16 scan_interval,
                                                UINT16 scan_window );
 
+/*******************************************************************************
+**
+** Function         BTA_DmSetBleAdvParams
+**
+** Description      This function sets the advertising parameters BLE functionality.
+**                  It is to be called when device act in peripheral or broadcaster
+**                  role.
+**
+** Parameters:      adv_int_min    - adv interval minimum
+**                  adv_int_max    - adv interval max
+**                  p_dir_bda      - directed adv initator address
+**
+** Returns          void
+**
+*******************************************************************************/
+BTA_API extern void BTA_DmSetBleAdvParams (UINT16 adv_int_min, UINT16 adv_int_max,
+                                           tBLE_BD_ADDR *p_dir_bda);
 /*******************************************************************************
 **
 ** Function         BTA_DmSearchExt

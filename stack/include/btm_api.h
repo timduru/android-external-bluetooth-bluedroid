@@ -67,6 +67,20 @@ enum
 };
 typedef UINT8 tBTM_STATUS;
 
+#if (defined(BTA_HOST_INTERLEAVE_SEARCH) && BTA_HOST_INTERLEAVE_SEARCH == TRUE)
+typedef enum
+{
+    BTM_BR_ONE,                         /*0 First state or BR/EDR scan 1*/
+    BTM_BLE_ONE,                        /*1BLE scan 1*/
+    BTM_BR_TWO,                         /*2 BR/EDR scan 2*/
+    BTM_BLE_TWO,                        /*3 BLE scan 2*/
+    BTM_FINISH,                         /*4 End of Interleave Scan, or normal scan*/
+    BTM_NO_INTERLEAVING                 /*5 No Interleaving*/
+}btm_inq_state;
+#endif
+
+
+
 /*************************
 **  Device Control Types
 **************************/
@@ -568,6 +582,9 @@ typedef struct              /* contains the parameters passed to the inquiry fun
     BOOLEAN report_dup;                 /* report duplicated inquiry response with higher RSSI value */
     UINT8   filter_cond_type;           /* new devices, BD ADDR, COD, or No filtering */
     tBTM_INQ_FILT_COND  filter_cond;    /* filter value based on filter cond type */
+#if (defined(BTA_HOST_INTERLEAVE_SEARCH) && BTA_HOST_INTERLEAVE_SEARCH == TRUE)
+    UINT8   intl_duration[4];              /*duration array storing the interleave scan's time portions*/
+#endif
 } tBTM_INQ_PARMS;
 
 #define BTM_INQ_RESULT_BR       0x01
@@ -1185,9 +1202,9 @@ typedef void (tBTM_ESCO_CBACK) (tBTM_ESCO_EVT event, tBTM_ESCO_EVT_DATA *p_data)
 #define BTM_SEC_SERVICE_TE_PHONE_ACCESS 30
 #define BTM_SEC_SERVICE_ME_PHONE_ACCESS 31
 
-#define BTM_SEC_SERVICE_HID_SEC_CTRL    32
-#define BTM_SEC_SERVICE_HID_NOSEC_CTRL  33
-#define BTM_SEC_SERVICE_HID_INTR        34
+#define BTM_SEC_SERVICE_HIDH_SEC_CTRL   32
+#define BTM_SEC_SERVICE_HIDH_NOSEC_CTRL 33
+#define BTM_SEC_SERVICE_HIDH_INTR       34
 #define BTM_SEC_SERVICE_BIP             35
 #define BTM_SEC_SERVICE_BIP_REF         36
 #define BTM_SEC_SERVICE_AVDTP           37
@@ -1272,9 +1289,9 @@ typedef void (tBTM_ESCO_CBACK) (tBTM_ESCO_EVT event, tBTM_ESCO_EVT_DATA *p_data)
 #define BTM_SEC_TRUST_ME_PHONE_ACCESS   (1 << BTM_SEC_SERVICE_ME_PHONE_ACCESS)
 
 /* 0..31 bits of mask[1] (Most Significant Word) */
-#define BTM_SEC_TRUST_HID_CTRL          (1 << (BTM_SEC_SERVICE_HID_SEC_CTRL - 32))
-#define BTM_SEC_TRUST_HID_NOSEC_CTRL    (1 << (BTM_SEC_SERVICE_HID_NOSEC_CTRL - 32))
-#define BTM_SEC_TRUST_HID_INTR          (1 << (BTM_SEC_SERVICE_HID_INTR - 32))
+#define BTM_SEC_TRUST_HIDH_CTRL         (1 << (BTM_SEC_SERVICE_HIDH_SEC_CTRL - 32))
+#define BTM_SEC_TRUST_HIDH_NOSEC_CTRL   (1 << (BTM_SEC_SERVICE_HIDH_NOSEC_CTRL - 32))
+#define BTM_SEC_TRUST_HIDH_INTR         (1 << (BTM_SEC_SERVICE_HIDH_INTR - 32))
 #define BTM_SEC_TRUST_BIP               (1 << (BTM_SEC_SERVICE_BIP - 32))
 #define BTM_SEC_TRUST_BIP_REF           (1 << (BTM_SEC_SERVICE_BIP_REF - 32))
 #define BTM_SEC_TRUST_AVDTP             (1 << (BTM_SEC_SERVICE_AVDTP - 32))

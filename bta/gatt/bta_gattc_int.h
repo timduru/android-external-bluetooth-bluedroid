@@ -68,8 +68,8 @@ enum
     BTA_GATTC_INT_START_IF_EVT,
     BTA_GATTC_API_REG_EVT,
     BTA_GATTC_API_DEREG_EVT,
-    BTA_GATTC_INT_DEREG_EVT
-
+    BTA_GATTC_API_LISTEN_EVT,
+    BTA_GATTC_API_DISABLE_EVT
 };
 typedef UINT16 tBTA_GATTC_INT_EVT;
 
@@ -90,6 +90,7 @@ typedef UINT16 tBTA_GATTC_INT_EVT;
 #endif
 
 #define BTA_GATTC_WRITE_PREPARE          GATT_WRITE_PREPARE
+
 
 /* internal strucutre for GATTC register API  */
 typedef struct
@@ -124,7 +125,7 @@ typedef struct
     tBTA_GATT_AUTH_REQ      auth_req;
     tBTA_GATT_SRVC_ID       srvc_id;
     tBTA_GATT_ID            char_id;
-    tBT_UUID                descr_type;
+    tBTA_GATT_ID            *p_descr_type;
 } tBTA_GATTC_API_READ;
 
 typedef struct
@@ -133,7 +134,7 @@ typedef struct
     tBTA_GATT_AUTH_REQ      auth_req;
     tBTA_GATT_SRVC_ID       srvc_id;
     tBTA_GATT_ID            char_id;
-    tBT_UUID                descr_type;
+    tBTA_GATT_ID            *p_descr_type;
     tBTA_GATTC_WRITE_TYPE   write_type;
     UINT16                  offset;
     UINT16                  len;
@@ -166,7 +167,7 @@ typedef struct
 typedef struct
 {
     BT_HDR              hdr;
-    tBT_UUID            srvc_uuid;
+    tBT_UUID            *p_srvc_uuid;
 }tBTA_GATTC_API_SEARCH;
 
 typedef struct
@@ -176,6 +177,23 @@ typedef struct
     UINT8                   num_attr;
     tBTA_GATTC_ATTR_ID      *p_id_list;
 }tBTA_GATTC_API_READ_MULTI;
+
+typedef struct
+{
+    BT_HDR                  hdr;
+    BD_ADDR_PTR             remote_bda;
+    tBTA_GATTC_IF           client_if;
+    BOOLEAN                 start;
+} tBTA_GATTC_API_LISTEN;
+
+typedef struct
+{
+    BT_HDR                  hdr;
+    BD_ADDR                 remote_bda;
+    tBTA_GATTC_IF           client_if;
+    UINT8                   role;
+    tGATT_DISCONN_REASON    reason;
+}tBTA_GATTC_INT_CONN;
 
 typedef union
 {
@@ -194,9 +212,12 @@ typedef union
     tBTA_GATTC_CI_EVT           ci_open;
     tBTA_GATTC_CI_EVT           ci_save;
     tBTA_GATTC_CI_LOAD          ci_load;
+    tBTA_GATTC_INT_CONN         int_conn;
 
     tBTA_GATTC_INT_START_IF     int_start_if;
     tBTA_GATTC_INT_DEREG        int_dereg;
+    /* if peripheral role is supported */
+    tBTA_GATTC_API_LISTEN       api_listen;
 
 } tBTA_GATTC_DATA;
 
@@ -231,6 +252,7 @@ typedef struct gattc_svc_cache
     UINT16                  s_handle;
     UINT16                  e_handle;
     struct                  gattc_svc_cache *p_next;
+    tBTA_GATTC_CACHE_ATTR   *p_cur_char;
 // btla-specific ++
 } __attribute__((packed)) tBTA_GATTC_CACHE;
 // btla-specific --
@@ -363,8 +385,18 @@ typedef struct
     BD_ADDR             remote_bda;
 }tBTA_GATTC_CONN;
 
+enum
+{
+   BTA_GATTC_STATE_DISABLED,
+   BTA_GATTC_STATE_ENABLING,
+   BTA_GATTC_STATE_ENABLED,
+   BTA_GATTC_STATE_DISABLING
+};
+
 typedef struct
 {
+    UINT8             state;
+
     tBTA_GATTC_CONN     conn_track[BTA_GATTC_CONN_MAX];
     tBTA_GATTC_BG_TCK   bg_track[BTA_GATTC_KNOWN_SR_MAX];
     tBTA_GATTC_RCB      cl_rcb[BTA_GATTC_CL_MAX];
@@ -395,12 +427,12 @@ extern BOOLEAN bta_gattc_hdl_event(BT_HDR *p_msg);
 extern void bta_gattc_sm_execute(tBTA_GATTC_CLCB *p_clcb, UINT16 event, tBTA_GATTC_DATA *p_data);
 
 /* function processed outside SM */
+extern void bta_gattc_disable(tBTA_GATTC_CB *p_cb);
 extern void bta_gattc_register(tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA *p_data);
 extern void bta_gattc_start_if(tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA *p_data);
 extern void bta_gattc_process_api_open (tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA * p_msg);
 extern void bta_gattc_process_api_open_cancel (tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA * p_msg);
-extern void bta_gattc_deregister(tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA *p_data);
-extern void bta_gattc_int_deregister(tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA *p_data);
+extern void bta_gattc_deregister(tBTA_GATTC_CB *p_cb, tBTA_GATTC_RCB  *p_clreg);
 
 /* function within state machine */
 extern void bta_gattc_open(tBTA_GATTC_CLCB *p_clcb, tBTA_GATTC_DATA *p_data);
@@ -440,7 +472,9 @@ extern void bta_gattc_cancel_bk_conn(tBTA_GATTC_API_CANCEL_OPEN *p_data);
 extern void bta_gattc_send_open_cback( tBTA_GATTC_RCB *p_clreg, tBTA_GATT_STATUS status,
                                        BD_ADDR remote_bda, UINT16 conn_id);
 extern void bta_gattc_process_api_refresh(tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA * p_msg);
-
+#if BLE_INCLUDED == TRUE
+extern void bta_gattc_listen(tBTA_GATTC_CB *p_cb, tBTA_GATTC_DATA * p_msg);
+#endif
 /* utility functions */
 extern tBTA_GATTC_CLCB * bta_gattc_find_clcb_by_cif (UINT8 client_if, BD_ADDR remote_bda);
 extern tBTA_GATTC_CLCB * bta_gattc_find_clcb_by_conn_id (UINT16 conn_id);
@@ -451,14 +485,17 @@ extern tBTA_GATTC_RCB * bta_gattc_cl_get_regcb(UINT8 client_if);
 extern tBTA_GATTC_SERV * bta_gattc_find_srcb(BD_ADDR bda);
 extern tBTA_GATTC_SERV * bta_gattc_srcb_alloc(BD_ADDR bda);
 extern tBTA_GATTC_SERV * bta_gattc_find_scb_by_cid (UINT16 conn_id);
+extern tBTA_GATTC_CLCB * bta_gattc_find_int_conn_clcb(tBTA_GATTC_DATA *p_msg);
+extern tBTA_GATTC_CLCB * bta_gattc_find_int_disconn_clcb(tBTA_GATTC_DATA *p_msg);
+
 extern BOOLEAN bta_gattc_enqueue(tBTA_GATTC_CLCB *p_clcb, tBTA_GATTC_DATA *p_data);
 
-extern UINT16 bta_gattc_id2handle(tBTA_GATTC_SERV *p_srcb, tBTA_GATT_SRVC_ID *p_service_id, tBTA_GATT_ID *p_char_id, tBT_UUID descr_uuid);
-extern BOOLEAN bta_gattc_handle2id(tBTA_GATTC_SERV *p_srcb, UINT16 handle, tBTA_GATT_SRVC_ID *service_id, tBTA_GATT_ID *char_id, tBT_UUID *p_type);
-extern BOOLEAN bta_gattc_uuid_compare (tBT_UUID src, tBT_UUID tar, BOOLEAN is_precise);
+extern UINT16 bta_gattc_id2handle(tBTA_GATTC_SERV *p_srcb, tBTA_GATT_SRVC_ID *p_service_id, tBTA_GATT_ID *p_char_id, tBTA_GATT_ID *p_descr_uuid);
+extern BOOLEAN bta_gattc_handle2id(tBTA_GATTC_SERV *p_srcb, UINT16 handle, tBTA_GATT_SRVC_ID *service_id, tBTA_GATT_ID *char_id, tBTA_GATT_ID *p_type);
+extern BOOLEAN bta_gattc_uuid_compare (tBT_UUID *p_src, tBT_UUID *p_tar, BOOLEAN is_precise);
 extern void bta_gattc_pack_attr_uuid(tBTA_GATTC_CACHE_ATTR   *p_attr, tBT_UUID *p_uuid);
 extern BOOLEAN bta_gattc_check_notif_registry(tBTA_GATTC_RCB  *p_clreg, tBTA_GATTC_SERV *p_srcb, tBTA_GATTC_NOTIFY  *p_notify);
-extern tBTA_GATT_STATUS bta_gattc_pack_read_cb_data(tBTA_GATTC_SERV *p_srcb, tBT_UUID descr_uuid, tGATT_VALUE *p_attr, tBTA_GATT_READ_VAL *p_value);
+extern tBTA_GATT_STATUS bta_gattc_pack_read_cb_data(tBTA_GATTC_SERV *p_srcb, tBT_UUID *p_descr_uuid, tGATT_VALUE *p_attr, tBTA_GATT_READ_VAL *p_value);
 extern BOOLEAN bta_gattc_mark_bg_conn (tBTA_GATTC_IF client_if,  BD_ADDR_PTR remote_bda, BOOLEAN add, BOOLEAN is_listen);
 extern BOOLEAN bta_gattc_check_bg_conn (tBTA_GATTC_IF client_if,  BD_ADDR remote_bda, UINT8 role);
 extern UINT8 bta_gattc_num_reg_app(void);
@@ -473,10 +510,10 @@ extern void bta_gattc_disc_res_cback (UINT16 conn_id, tGATT_DISC_TYPE disc_type,
 extern void bta_gattc_disc_cmpl_cback (UINT16 conn_id, tGATT_DISC_TYPE disc_type, tGATT_STATUS status);
 extern tBTA_GATT_STATUS bta_gattc_discover_procedure(UINT16 conn_id, tBTA_GATTC_SERV *p_server_cb, UINT8 disc_type);
 extern tBTA_GATT_STATUS bta_gattc_discover_pri_service(UINT16 conn_id, tBTA_GATTC_SERV *p_server_cb, UINT8 disc_type);
-extern void bta_gattc_search_service(tBTA_GATTC_CLCB *p_clcb, tBT_UUID uuid);
+extern void bta_gattc_search_service(tBTA_GATTC_CLCB *p_clcb, tBT_UUID *p_uuid);
 extern tBTA_GATT_STATUS bta_gattc_query_cache(UINT16 conn_id, UINT8 query_type, tBTA_GATT_SRVC_ID *p_srvc_id,
                                               tBTA_GATT_ID *p_start_rec,tBT_UUID *p_uuid_cond,
-                                              tBTA_GATT_ID *p_output, void *p_property);
+                                              tBTA_GATT_ID *p_output, void *p_param);
 extern tBTA_GATT_STATUS bta_gattc_init_cache(tBTA_GATTC_SERV *p_srvc_cb);
 extern void bta_gattc_rebuild_cache(tBTA_GATTC_SERV *p_srcv, UINT16 num_attr, tBTA_GATTC_NV_ATTR *p_attr, UINT16 attr_index);
 extern BOOLEAN bta_gattc_cache_save(tBTA_GATTC_SERV *p_srvc_cb, UINT16 conn_id);

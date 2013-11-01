@@ -53,7 +53,7 @@
 #include "dyn_mem.h"    /* defines static and/or dynamic memory for components */
 
 
-//------------------Added from Bluedroid buildcfg.h---------------------
+//------------------Added from bdroid_buildcfg.h---------------------
 #ifndef UNV_INCLUDED
 #define UNV_INCLUDED FALSE
 #endif
@@ -185,6 +185,10 @@
 
 #ifndef BTA_HH_ROLE
 #define BTA_HH_ROLE BTA_MASTER_ROLE_PREF
+#endif
+
+#ifndef BTA_HH_LE_INCLUDED
+#define BTA_HH_LE_INCLUDED TRUE
 #endif
 
 #ifndef BTA_AR_INCLUDED
@@ -331,10 +335,6 @@
 #define BTA_AG_SCO_PKT_TYPES  (BTM_SCO_LINK_ONLY_MASK | BTM_SCO_PKT_TYPES_MASK_EV3 |  BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 | BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 | BTM_SCO_PKT_TYPES_MASK_NO_3_EV5)
 #endif
 
-#ifndef BTA_AV_MAX_A2DP_MTU
-#define BTA_AV_MAX_A2DP_MTU  668
-#endif
-
 #ifndef BTA_AV_RET_TOUT
 #define BTA_AV_RET_TOUT 15
 #endif
@@ -349,6 +349,11 @@
 
 #ifndef AVDT_CONNECT_CP_ONLY
 #define AVDT_CONNECT_CP_ONLY  FALSE
+#endif
+
+/* This feature is used to eanble interleaved scan*/
+#ifndef BTA_HOST_INTERLEAVE_SEARCH
+#define BTA_HOST_INTERLEAVE_SEARCH FALSE
 #endif
 
 #ifndef BT_TRACE_PROTOCOL
@@ -410,7 +415,8 @@
 #ifndef BTIF_DM_OOB_TEST
 #define BTIF_DM_OOB_TEST  TRUE
 #endif
-//------------------End added from Bluedroid buildcfg.h---------------------
+
+//------------------End added from bdroid_buildcfg.h---------------------
 
 
 
@@ -1053,12 +1059,9 @@ and USER_HW_DISABLE_API macros */
 #define BTM_MAX_LOC_BD_NAME_LEN     248
 #endif
 
-/* TRUE if default string is used, FALSE if device name is set in the application */
-#ifndef BTM_USE_DEF_LOCAL_NAME
-#define BTM_USE_DEF_LOCAL_NAME      TRUE
-#endif
-
-/* Fixed Default String (Ignored if BTM_USE_DEF_LOCAL_NAME is FALSE) */
+/* Fixed Default String. When this is defined as null string, the device's
+ * product model name is used as the default local name.
+ */
 #ifndef BTM_DEF_LOCAL_NAME
 #define BTM_DEF_LOCAL_NAME      ""
 #endif
@@ -3483,6 +3486,10 @@ Range: Minimum 12000 (12 secs) when supporting PBF.
 #define AVRC_METADATA_INCLUDED      TRUE
 #endif
 
+#ifndef AVRC_ADV_CTRL_INCLUDED
+#define AVRC_ADV_CTRL_INCLUDED      TRUE
+#endif
+
 /******************************************************************************
 **
 ** MCAP
@@ -3760,6 +3767,9 @@ The maximum number of payload octets that the local device can receive in a sing
 #define BTA_AG_CIND_INFO "(\"call\",(0,1)),(\"callsetup\",(0-3)),(\"service\",(0-1)),(\"signal\",(0-5)),(\"roam\",(0,1)),(\"battchg\",(0-5)),(\"callheld\",(0-2))"
 #endif
 
+#ifndef BTA_DM_AVOID_A2DP_ROLESWITCH_ON_INQUIRY
+#define BTA_DM_AVOID_A2DP_ROLESWITCH_ON_INQUIRY TRUE
+#endif
 
 /******************************************************************************
 **
