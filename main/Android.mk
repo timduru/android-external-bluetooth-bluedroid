@@ -6,6 +6,10 @@ LOCAL_PATH:= $(call my-dir)
 
 include $(CLEAR_VARS)
 
+ifeq ($(TARGET_QCOM_AUDIO_VARIANT),caf)
+	LOCAL_CFLAGS += -DSAMPLE_RATE_48K
+endif
+
 # HAL layer
 LOCAL_SRC_FILES:= \
 	../btif/src/bluetooth.c
