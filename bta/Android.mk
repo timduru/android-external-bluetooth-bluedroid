@@ -1,5 +1,3 @@
-ifneq ($(TARGET_SIMULATOR),true)
-
 LOCAL_PATH:= $(call my-dir)
 
 include $(CLEAR_VARS)
@@ -8,7 +6,7 @@ ifeq ($(BOARD_HAVE_BLUETOOTH_BCM),true)
 LOCAL_CFLAGS += \
 	-DBOARD_HAVE_BLUETOOTH_BCM
 endif
-LOCAL_CFLAGS += -DBUILDCFG $(bdroid_CFLAGS)
+LOCAL_CFLAGS += -DBUILDCFG $(bdroid_CFLAGS) -std=c99
 
 LOCAL_PRELINK_MODULE:=false
 LOCAL_SRC_FILES:= \
@@ -39,6 +37,14 @@ LOCAL_SRC_FILES:= \
     ./ag/bta_ag_cmd.c \
     ./ag/bta_ag_ci.c \
     ./ag/bta_ag_at.c \
+    ./hf_client/bta_hf_client_act.c \
+    ./hf_client/bta_hf_client_api.c \
+    ./hf_client/bta_hf_client_main.c \
+    ./hf_client/bta_hf_client_rfc.c \
+    ./hf_client/bta_hf_client_at.c \
+    ./hf_client/bta_hf_client_sdp.c \
+    ./hf_client/bta_hf_client_sco.c \
+    ./hf_client/bta_hf_client_cmd.c \
     ./hh/bta_hh_cfg.c \
     ./hh/bta_hh_act.c \
     ./hh/bta_hh_api.c \
@@ -67,6 +73,10 @@ LOCAL_SRC_FILES:= \
     ./hl/bta_hl_utils.c \
     ./hl/bta_hl_sdp.c \
     ./hl/bta_hl_ci.c \
+    ./mce/bta_mce_api.c \
+    ./mce/bta_mce_main.c \
+    ./mce/bta_mce_act.c \
+    ./mce/bta_mce_cfg.c \
     ./sys/bta_sys_main.c \
     ./sys/bta_sys_ci.c \
     ./sys/bta_sys_conn.c \
@@ -77,12 +87,13 @@ LOCAL_SRC_FILES:= \
     ./jv/bta_jv_act.c \
     ./jv/bta_jv_cfg.c \
     ./jv/bta_jv_main.c \
-    ./jv/bta_jv_api.c
+    ./jv/bta_jv_api.c \
 
 LOCAL_MODULE := libbt-brcm_bta
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_MODULE_TAGS := optional
 LOCAL_SHARED_LIBRARIES := libcutils libc
+LOCAL_MULTILIB := 32
 
 LOCAL_C_INCLUDES+= . \
                    $(LOCAL_PATH)/include \
@@ -97,10 +108,9 @@ LOCAL_C_INCLUDES+= . \
                    $(LOCAL_PATH)/../hcis \
                    $(LOCAL_PATH)/../hcis/patchram \
                    $(LOCAL_PATH)/../udrv/include \
-                   $(LOCAL_PATH)/../brcm/include \
+                   $(LOCAL_PATH)/../vnd/include \
+                   $(LOCAL_PATH)/../utils/include \
                    $(bdroid_C_INCLUDES) \
 
 
 include $(BUILD_STATIC_LIBRARY)
-
-endif  # TARGET_SIMULATOR != true

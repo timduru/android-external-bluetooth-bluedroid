@@ -45,14 +45,12 @@
 #define GKI_ERROR_ADDR_NOT_IN_BUF       0xFFF5
 #define GKI_ERROR_OUT_OF_BUFFERS        0xFFF4
 #define GKI_ERROR_GETPOOLBUF_BAD_QID    0xFFF3
+#define GKI_ERROR_TIMER_LIST_CORRUPTED  0xFFF2
 
 
 /********************************************************************
 **  Misc constants
 *********************************************************************/
-
-#define GKI_MAX_INT32           (0x7fffffffL)
-#define GKI_MAX_TIMESTAMP       (0xffffffffL)
 
 /********************************************************************
 **  Buffer Management Data Structures
@@ -63,14 +61,14 @@ typedef struct _buffer_hdr
     struct _buffer_hdr *p_next;   /* next buffer in the queue */
 	UINT8   q_id;                 /* id of the queue */
 	UINT8   task_id;              /* task which allocated the buffer*/
-    UINT8   status;               /* FREE, UNLINKED or QUEUED */
+	UINT8   status;               /* FREE, UNLINKED or QUEUED */
 	UINT8   Type;
 } BUFFER_HDR_T;
 
 typedef struct _free_queue
 {
 	BUFFER_HDR_T *p_first;      /* first buffer in the queue */
-    BUFFER_HDR_T *p_last;       /* last buffer in the queue */
+	BUFFER_HDR_T *p_last;       /* last buffer in the queue */
 	UINT16		 size;          /* size of the buffers in the pool */
 	UINT16		 total;         /* toatal number of buffers */
 	UINT16		 cur_cnt;       /* number of  buffers currently allocated */
@@ -269,9 +267,6 @@ typedef struct
     /* Timer related variables
     */
     INT32   OSTicksTilExp;      /* Number of ticks till next timer expires */
-#if (defined(GKI_DELAY_STOP_SYS_TICK) && (GKI_DELAY_STOP_SYS_TICK > 0))
-    UINT32  OSTicksTilStop;     /* inactivity delay timer; OS Ticks till stopping system tick */
-#endif
     INT32   OSNumOrigTicks;     /* Number of ticks between last timer expiration to the next one */
 
     INT32   OSWaitTmr   [GKI_MAX_TASKS];  /* ticks the task has to wait, for specific events */
@@ -326,12 +321,6 @@ typedef struct
 
     BOOLEAN     timer_nesting;                      /* flag to prevent timer interrupt nesting */
 
-    /* Time queue arrays */
-    TIMER_LIST_Q *timer_queues[GKI_MAX_TIMER_QUEUES];
-    /* System tick callback */
-    SYSTEM_TICK_CBACK *p_tick_cb;
-    BOOLEAN     system_tick_running;                /* TRUE if system tick is running. Valid only if p_tick_cb is not NULL */
-
 #if (GKI_DEBUG == TRUE)
     UINT16      ExceptionCnt;                       /* number of GKI exceptions that have happened */
     EXCEPTION_T Exception[GKI_MAX_EXCEPTION];
@@ -355,13 +344,6 @@ extern void      gki_adjust_timer_count (INT32);
 #ifdef GKI_USE_DEFERED_ALLOC_BUF_POOLS
 extern void      gki_dealloc_free_queue(void);
 #endif
-
-extern void    OSStartRdy(void);
-extern void	   OSCtxSw(void);
-extern void	   OSIntCtxSw(void);
-extern void    OSSched(void);
-extern void    OSIntEnter(void);
-extern void    OSIntExit(void);
 
 
 /* Debug aids

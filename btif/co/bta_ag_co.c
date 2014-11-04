@@ -21,6 +21,7 @@
 #include "bta_ag_api.h"
 #include "bta_ag_co.h"
 #include "bte_appl.h"
+#include "bt_utils.h"
 
 #define LOG_TAG "BTA_AG_CO: "
 
@@ -35,6 +36,11 @@
 #define LOGE(format, ...)  fprintf (stderr, LOG_TAG format"\n", ## __VA_ARGS__)
 #endif
 
+
+/************************************************************************************
+**  Externs
+************************************************************************************/
+extern int set_audio_state(UINT16 handle, UINT16 codec, UINT8 state, void *param);
 
 /*******************************************************************************
 **
@@ -68,13 +74,53 @@ void bta_ag_co_init(void)
 **                      BTA_AG_CO_AUD_STATE_OFF_XFER - Audio has been turned off (xfer)
 **                      BTA_AG_CO_AUD_STATE_ON      - Audio has been turned on
 **                      BTA_AG_CO_AUD_STATE_SETUP   - Audio is about to be turned on
+**                  codec - if WBS support is compiled in, codec to going to be used is provided
+**                      and when in BTA_AG_CO_AUD_STATE_SETUP, BTM_I2SPCMConfig() must be called with
+**                      the correct platform parameters.
+**                      in the other states codec type should not be ignored
 **
 ** Returns          void
 **
 *******************************************************************************/
+#if (BTM_WBS_INCLUDED == TRUE )
+void bta_ag_co_audio_state(UINT16 handle, UINT8 app_id, UINT8 state, tBTA_AG_PEER_CODEC codec)
+#else
 void bta_ag_co_audio_state(UINT16 handle, UINT8 app_id, UINT8 state)
+#endif
 {
-    BTIF_TRACE_DEBUG2("bta_ag_co_audio_state: handle %d, state %d", handle, state);
+    BTIF_TRACE_DEBUG("bta_ag_co_audio_state: handle %d, state %d", handle, state);
+    switch (state)
+    {
+    case BTA_AG_CO_AUD_STATE_OFF:
+#if (BTM_WBS_INCLUDED == TRUE )
+        BTIF_TRACE_DEBUG("bta_ag_co_audio_state(handle %d)::Closed (OFF), codec: 0x%x",
+                        handle, codec);
+        set_audio_state(handle, codec, state, NULL);
+#else
+        BTIF_TRACE_DEBUG("bta_ag_co_audio_state(handle %d)::Closed (OFF)",
+                        handle);
+#endif
+        break;
+    case BTA_AG_CO_AUD_STATE_OFF_XFER:
+        BTIF_TRACE_DEBUG("bta_ag_co_audio_state(handle %d)::Closed (XFERRING)", handle);
+        break;
+    case BTA_AG_CO_AUD_STATE_SETUP:
+#if (BTM_WBS_INCLUDED == TRUE )
+        set_audio_state(handle, codec, state, NULL);
+#else
+        set_audio_state(handle, BTA_AG_CODEC_CVSD, state, NULL);
+#endif
+        break;
+    default:
+        break;
+    }
+#if (BTM_WBS_INCLUDED == TRUE )
+    APPL_TRACE_DEBUG("bta_ag_co_audio_state(handle %d, app_id: %d, state %d, codec: 0x%x)",
+                      handle, app_id, state, codec);
+#else
+    APPL_TRACE_DEBUG("bta_ag_co_audio_state(handle %d, app_id: %d, state %d)", \
+    handle, app_id, state);
+#endif
 }
 
 
@@ -93,7 +139,7 @@ void bta_ag_co_audio_state(UINT16 handle, UINT8 app_id, UINT8 state)
 *******************************************************************************/
 void bta_ag_co_data_open(UINT16 handle, tBTA_SERVICE_ID service)
 {
-    BTIF_TRACE_DEBUG2("bta_ag_co_data_open handle:%d service:%d", handle, service);
+    BTIF_TRACE_DEBUG("bta_ag_co_data_open handle:%d service:%d", handle, service);
 }
 
 /*******************************************************************************
@@ -109,7 +155,7 @@ void bta_ag_co_data_open(UINT16 handle, tBTA_SERVICE_ID service)
 *******************************************************************************/
 void bta_ag_co_data_close(UINT16 handle)
 {
-    BTIF_TRACE_DEBUG1("bta_ag_co_data_close handle:%d", handle);
+    BTIF_TRACE_DEBUG("bta_ag_co_data_close handle:%d", handle);
 }
 
 
@@ -127,6 +173,7 @@ void bta_ag_co_data_close(UINT16 handle)
  *******************************************************************************/
 void bta_ag_co_tx_write(UINT16 handle, UINT8 * p_data, UINT16 len)
 {
-   BTIF_TRACE_DEBUG2( "bta_ag_co_tx_write: handle: %d, len: %d", handle, len );
+    UNUSED(p_data);
+    BTIF_TRACE_DEBUG( "bta_ag_co_tx_write: handle: %d, len: %d", handle, len );
 }
 

@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "bt_target.h"
+#include "bt_utils.h"
 #include "gki.h"
 #include "l2cdefs.h"
 #include "hcidefs.h"
@@ -78,7 +79,7 @@ BOOLEAN SDP_InitDiscoveryDb (tSDP_DISCOVERY_DB *p_db, UINT32 len, UINT16 num_uui
     if (p_db == NULL || (sizeof (tSDP_DISCOVERY_DB) > len) ||
         num_attr > SDP_MAX_ATTR_FILTERS || num_uuid > SDP_MAX_UUID_FILTERS)
     {
-        SDP_TRACE_ERROR4("SDP_InitDiscoveryDb Illegal param: p_db 0x%x, len %d, num_uuid %d, num_attr %d",
+        SDP_TRACE_ERROR("SDP_InitDiscoveryDb Illegal param: p_db 0x%x, len %d, num_uuid %d, num_attr %d",
                          (UINT32)p_db, len, num_uuid, num_attr);
 
         return(FALSE);
@@ -244,6 +245,8 @@ BOOLEAN SDP_ServiceSearchAttributeRequest2 (UINT8 *p_bd_addr, tSDP_DISCOVERY_DB 
 #if SDP_CLIENT_ENABLED == TRUE
 void SDP_SetIdleTimeout (BD_ADDR addr, UINT16 timeout)
 {
+    UNUSED(addr);
+    UNUSED(timeout);
 }
 #endif
 
@@ -510,12 +513,13 @@ tSDP_DISC_REC *SDP_FindServiceInDb (tSDP_DISCOVERY_DB *p_db, UINT16 service_uuid
 
                     if ((SDP_DISC_ATTR_TYPE(p_sattr->attr_len_type) == UUID_DESC_TYPE)
                      && (SDP_DISC_ATTR_LEN(p_sattr->attr_len_type) == 2) ) {
-                        printf("SDP_FindServiceInDb - p_sattr value = 0x%x serviceuuid = 0x%x\r\n", p_sattr->attr_value.v.u16, service_uuid);
+                        SDP_TRACE_DEBUG("SDP_FindServiceInDb - p_sattr value = 0x%x serviceuuid = 0x%x\r\n",
+                                        p_sattr->attr_value.v.u16, service_uuid);
                         if(service_uuid == UUID_SERVCLASS_HDP_PROFILE)
                         {
-                            if( (p_sattr->attr_value.v.u16==UUID_SERVCLASS_HDP_SOURCE) || ( p_sattr->attr_value.v.u16==UUID_SERVCLASS_HDP_SOURCE))
+                            if( (p_sattr->attr_value.v.u16==UUID_SERVCLASS_HDP_SOURCE) || ( p_sattr->attr_value.v.u16==UUID_SERVCLASS_HDP_SINK))
                             {
-                                printf("SDP_FindServiceInDb found HDP source or sink\n" );
+                                SDP_TRACE_DEBUG("SDP_FindServiceInDb found HDP source or sink\n" );
                                 return (p_rec);
                             }
                         }
@@ -683,14 +687,14 @@ tSDP_DISC_REC *SDP_FindServiceUUIDInDb (tSDP_DISCOVERY_DB *p_db, tBT_UUID *p_uui
                     if (SDP_DISC_ATTR_TYPE(p_sattr->attr_len_type) == UUID_DESC_TYPE)
                     {
 
-                        printf("uuid len=%d ", p_uuid->len);
+                        SDP_TRACE_DEBUG("uuid len=%d ", p_uuid->len);
                         if (p_uuid->len == 2)
                         {
-                            printf("uuid=0x%x \n", p_uuid->uu.uuid16);
+                            SDP_TRACE_DEBUG("uuid=0x%x \n", p_uuid->uu.uuid16);
                         }
                         else
                         {
-                            printf("\n");
+                            SDP_TRACE_DEBUG("\n");
                         }
 
                         if (sdpu_compare_uuid_with_attr (p_uuid, p_sattr))
@@ -744,7 +748,7 @@ static BOOLEAN sdp_fill_proto_elem( tSDP_DISC_ATTR  *p_attr, UINT16 layer_uuid,
         /* Now, see if the entry contains the layer we are interested in */
         for (p_sattr = p_attr->attr_value.v.p_sub_attr; p_sattr; p_sattr = p_sattr->p_next_attr)
         {
-            /* SDP_TRACE_DEBUG3 ("SDP - p_sattr 0x%x, layer_uuid:0x%x, u16:0x%x####",
+            /* SDP_TRACE_DEBUG ("SDP - p_sattr 0x%x, layer_uuid:0x%x, u16:0x%x####",
                 p_sattr, layer_uuid, p_sattr->attr_value.v.u16); */
 
             if ((SDP_DISC_ATTR_TYPE(p_sattr->attr_len_type) == UUID_DESC_TYPE)
@@ -989,6 +993,34 @@ UINT8 SDP_GetNumDiRecords( tSDP_DISCOVERY_DB *p_db )
 
 /*******************************************************************************
 **
+** Function         SDP_AttrStringCopy
+**
+** Description      This function copy given attribute to specified buffer as a string
+**
+** Returns          none
+**
+*******************************************************************************/
+static void SDP_AttrStringCopy(char *dst, tSDP_DISC_ATTR *p_attr, UINT16 dst_size)
+{
+    if ( dst == NULL ) return;
+    if ( p_attr )
+    {
+        UINT16 len = SDP_DISC_ATTR_LEN(p_attr->attr_len_type);
+        if ( len > dst_size - 1 )
+        {
+            len = dst_size - 1;
+        }
+        memcpy(dst, (char *)p_attr->attr_value.v.array, len);
+        dst[len] = '\0';
+    }
+    else
+    {
+        dst[0] = '\0';
+    }
+}
+
+/*******************************************************************************
+**
 ** Function         SDP_GetDiRecord
 **
 ** Description      This function retrieves a remote device's DI record from
@@ -1028,27 +1060,16 @@ UINT16 SDP_GetDiRecord( UINT8 get_record_index, tSDP_DI_GET_RECORD *p_device_inf
 
         /* ClientExecutableURL is optional */
         p_curr_attr = SDP_FindAttributeInRec( p_curr_record, ATTR_ID_CLIENT_EXE_URL );
-        if ( p_curr_attr )
-            BCM_STRNCPY_S( p_device_info->rec.client_executable_url, sizeof(p_device_info->rec.client_executable_url),
-                           (char *)p_curr_attr->attr_value.v.array, SDP_MAX_ATTR_LEN );
-        else
-            p_device_info->rec.client_executable_url[0] = '\0';
+        SDP_AttrStringCopy( p_device_info->rec.client_executable_url, p_curr_attr,
+                            SDP_MAX_ATTR_LEN );
 
         /* Service Description is optional */
         p_curr_attr = SDP_FindAttributeInRec( p_curr_record, ATTR_ID_SERVICE_DESCRIPTION );
-        if ( p_curr_attr )
-            BCM_STRNCPY_S( p_device_info->rec.service_description, sizeof(p_device_info->rec.service_description),
-                           (char *)p_curr_attr->attr_value.v.array, SDP_MAX_ATTR_LEN );
-        else
-            p_device_info->rec.service_description[0] = '\0';
+        SDP_AttrStringCopy( p_device_info->rec.service_description, p_curr_attr, SDP_MAX_ATTR_LEN );
 
         /* DocumentationURL is optional */
         p_curr_attr = SDP_FindAttributeInRec( p_curr_record, ATTR_ID_DOCUMENTATION_URL );
-        if ( p_curr_attr )
-            BCM_STRNCPY_S( p_device_info->rec.documentation_url, sizeof(p_device_info->rec.documentation_url),
-                           (char *)p_curr_attr->attr_value.v.array, SDP_MAX_ATTR_LEN );
-        else
-            p_device_info->rec.documentation_url[0] = '\0';
+        SDP_AttrStringCopy( p_device_info->rec.documentation_url, p_curr_attr, SDP_MAX_ATTR_LEN );
 
         p_curr_attr = SDP_FindAttributeInRec( p_curr_record, ATTR_ID_SPECIFICATION_ID );
         if ( p_curr_attr )

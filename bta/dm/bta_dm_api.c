@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2012 Broadcom Corporation
+ *  Copyright (C) 2003-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,6 +31,8 @@
 #include "btm_api.h"
 #include "btm_int.h"
 #include <string.h>
+#include "utl.h"
+#include "vendor_ble.h"
 
 /*****************************************************************************
 **  Constants
@@ -70,14 +72,11 @@ tBTA_STATUS BTA_EnableBluetooth(tBTA_DM_SEC_CBACK *p_cback)
 
     memset(&bta_dm_cb, 0, sizeof(bta_dm_cb));
 
-    GKI_sched_lock();
     bta_sys_register (BTA_ID_DM, &bta_dm_reg );
     bta_sys_register (BTA_ID_DM_SEARCH, &bta_dm_search_reg );
 
     /* if UUID list is not provided as static data */
     bta_sys_eir_register(bta_dm_eir_update_uuid);
-
-    GKI_sched_unlock();
 
     if ((p_msg = (tBTA_DM_API_ENABLE *) GKI_getbuf(sizeof(tBTA_DM_API_ENABLE))) != NULL)
     {
@@ -132,7 +131,7 @@ tBTA_STATUS BTA_EnableTestMode(void)
 {
     BT_HDR    *p_msg;
 
-    APPL_TRACE_API0("BTA_EnableTestMode");
+    APPL_TRACE_API("BTA_EnableTestMode");
 
     if ((p_msg = (BT_HDR *) GKI_getbuf(sizeof(BT_HDR))) != NULL)
     {
@@ -157,7 +156,7 @@ void BTA_DisableTestMode(void)
 {
     BT_HDR    *p_msg;
 
-    APPL_TRACE_API0("BTA_DisableTestMode");
+    APPL_TRACE_API("BTA_DisableTestMode");
 
     if ((p_msg = (BT_HDR *) GKI_getbuf(sizeof(BT_HDR))) != NULL)
     {
@@ -178,14 +177,7 @@ void BTA_DisableTestMode(void)
 *******************************************************************************/
 BOOLEAN BTA_DmIsDeviceUp(void)
 {
-
-    BOOLEAN status;
-
-    GKI_sched_lock();
-    status = BTM_IsDeviceUp();
-    GKI_sched_unlock();
-    return status;
-
+    return BTM_IsDeviceUp();
 }
 
 /*******************************************************************************
@@ -207,7 +199,7 @@ void BTA_DmSetDeviceName(char *p_name)
     {
         p_msg->hdr.event = BTA_DM_API_SET_NAME_EVT;
         /* truncate the name if needed */
-        BCM_STRNCPY_S(p_msg->name, sizeof(p_msg->name), p_name, BD_NAME_LEN-1);
+        BCM_STRNCPY_S((char *)p_msg->name, sizeof(p_msg->name), p_name, BD_NAME_LEN-1);
         p_msg->name[BD_NAME_LEN-1]=0;
 
         bta_sys_sendmsg(p_msg);
@@ -261,7 +253,7 @@ void BTA_DmSetVisibility(tBTA_DM_DISC disc_mode, tBTA_DM_CONN conn_mode, UINT8 p
 void BTA_DmSetScanParam (UINT16 page_scan_interval, UINT16 page_scan_window,
                                   UINT16 inquiry_scan_interval, UINT16 inquiry_scan_window)
 {
-    APPL_TRACE_API4 ("BTA_DmSetScanParam: %d, %d, %d, %d",
+    APPL_TRACE_API ("BTA_DmSetScanParam: %d, %d, %d, %d",
             page_scan_interval, page_scan_window,
             inquiry_scan_interval, inquiry_scan_window);
 
@@ -504,7 +496,7 @@ BOOLEAN BTA_DmIsMaster(BD_ADDR bd_addr)
     UINT8 link_role;
 
     BTM_GetRole(bd_addr, &link_role);
-    APPL_TRACE_API1("BTA_DmIsMaster role:x%x", link_role);
+    APPL_TRACE_API("BTA_DmIsMaster role:x%x", link_role);
     if(link_role == BTM_ROLE_MASTER)
     {
         is_master = TRUE;
@@ -525,12 +517,29 @@ BOOLEAN BTA_DmIsMaster(BD_ADDR bd_addr)
 *******************************************************************************/
 void BTA_DmBond(BD_ADDR bd_addr)
 {
+    BTA_DmBondByTransport (bd_addr, BTA_TRANSPORT_UNKNOWN);
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBondByTransports
+**
+** Description      This function initiates a bonding procedure with a peer
+**                  device
+**
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmBondByTransport(BD_ADDR bd_addr, tBTA_TRANSPORT transport)
+{
     tBTA_DM_API_BOND    *p_msg;
 
     if ((p_msg = (tBTA_DM_API_BOND *) GKI_getbuf(sizeof(tBTA_DM_API_BOND))) != NULL)
     {
         p_msg->hdr.event = BTA_DM_API_BOND_EVT;
         bdcpy(p_msg->bd_addr, bd_addr);
+        p_msg->transport = transport;
         bta_sys_sendmsg(p_msg);
     }
 
@@ -1084,6 +1093,22 @@ BOOLEAN BTA_DmUseSsr( BD_ADDR bd_addr )
 }
 
 /*******************************************************************************
+**
+** Function         BTA_DmGetConnectionState
+**
+** Description      Returns whether the remote device is currently connected.
+**
+** Returns          0 if the device is NOT connected.
+**
+*******************************************************************************/
+UINT16 BTA_DmGetConnectionState( BD_ADDR bd_addr )
+{
+    tBTA_DM_PEER_DEVICE * p_dev = bta_dm_find_peer_device(bd_addr);
+    return (p_dev && p_dev->conn_state == BTA_DM_CONNECTED);
+}
+
+
+/*******************************************************************************
 **                   Device Identification (DI) Server Functions
 *******************************************************************************/
 /*******************************************************************************
@@ -1209,7 +1234,7 @@ void BTA_SysFeatures (UINT16 sys_features)
 {
     bta_sys_cb.sys_features = sys_features;
 
-    APPL_TRACE_API1("BTA_SysFeatures: sys_features = %d", sys_features);
+    APPL_TRACE_API("BTA_SysFeatures: sys_features = %d", sys_features);
 }
 
 /*******************************************************************************
@@ -1463,7 +1488,7 @@ void BTA_DmSetBleAdvParams (UINT16 adv_int_min, UINT16 adv_int_max,
 #if BLE_INCLUDED == TRUE
     tBTA_DM_API_BLE_ADV_PARAMS    *p_msg;
 
-    APPL_TRACE_API2 ("BTA_DmSetBleAdvParam: %d, %d", adv_int_min, adv_int_max);
+    APPL_TRACE_API ("BTA_DmSetBleAdvParam: %d, %d", adv_int_min, adv_int_max);
 
     if ((p_msg = (tBTA_DM_API_BLE_ADV_PARAMS *) GKI_getbuf(sizeof(tBTA_DM_API_BLE_ADV_PARAMS))) != NULL)
     {
@@ -1484,6 +1509,9 @@ void BTA_DmSetBleAdvParams (UINT16 adv_int_min, UINT16 adv_int_max,
     }
 #endif
 }
+/*******************************************************************************
+**                      BLE ADV data management API
+********************************************************************************/
 
 #if BLE_INCLUDED == TRUE
 /*******************************************************************************
@@ -1492,19 +1520,26 @@ void BTA_DmSetBleAdvParams (UINT16 adv_int_min, UINT16 adv_int_max,
 **
 ** Description      This function is called to override the BTA default ADV parameters.
 **
-** Parameters       Pointer to User defined ADV data structure
+** Parameters       data_mask: adv data mask.
+**                  p_adv_cfg: Pointer to User defined ADV data structure. This
+**                             memory space can not be freed until p_adv_data_cback
+**                             is received.
+**                  p_adv_data_cback: set adv data complete callback.
 **
 ** Returns          None
 **
 *******************************************************************************/
-void BTA_DmBleSetAdvConfig (tBTA_BLE_AD_MASK data_mask, tBTA_BLE_ADV_DATA *p_adv_cfg)
+void BTA_DmBleSetAdvConfig (tBTA_BLE_AD_MASK data_mask, tBTA_BLE_ADV_DATA *p_adv_cfg,
+                            tBTA_SET_ADV_DATA_CMPL_CBACK *p_adv_data_cback)
 {
     tBTA_DM_API_SET_ADV_CONFIG  *p_msg;
 
-    if ((p_msg = (tBTA_DM_API_SET_ADV_CONFIG *) GKI_getbuf(sizeof(tBTA_DM_API_SET_ADV_CONFIG))) != NULL)
+    if ((p_msg = (tBTA_DM_API_SET_ADV_CONFIG *)
+        GKI_getbuf(sizeof(tBTA_DM_API_SET_ADV_CONFIG))) != NULL)
     {
         p_msg->hdr.event = BTA_DM_API_BLE_SET_ADV_CONFIG_EVT;
-		p_msg->data_mask = data_mask;
+        p_msg->data_mask = data_mask;
+        p_msg->p_adv_data_cback = p_adv_data_cback;
         p_msg->p_adv_cfg = p_adv_cfg;
 
         bta_sys_sendmsg(p_msg);
@@ -1522,16 +1557,176 @@ void BTA_DmBleSetAdvConfig (tBTA_BLE_AD_MASK data_mask, tBTA_BLE_ADV_DATA *p_adv
 ** Returns          None
 **
 *******************************************************************************/
-BTA_API extern void BTA_DmBleSetScanRsp (tBTA_BLE_AD_MASK data_mask, tBTA_BLE_ADV_DATA *p_adv_cfg)
+BTA_API extern void BTA_DmBleSetScanRsp (tBTA_BLE_AD_MASK data_mask, tBTA_BLE_ADV_DATA *p_adv_cfg,
+                        tBTA_SET_ADV_DATA_CMPL_CBACK *p_adv_data_cback)
 {
     tBTA_DM_API_SET_ADV_CONFIG  *p_msg;
 
-    if ((p_msg = (tBTA_DM_API_SET_ADV_CONFIG *) GKI_getbuf(sizeof(tBTA_DM_API_SET_ADV_CONFIG))) != NULL)
+    if ((p_msg = (tBTA_DM_API_SET_ADV_CONFIG *)
+        GKI_getbuf(sizeof(tBTA_DM_API_SET_ADV_CONFIG))) != NULL)
     {
         p_msg->hdr.event = BTA_DM_API_BLE_SET_SCAN_RSP_EVT;
-		p_msg->data_mask = data_mask;
+        p_msg->data_mask = data_mask;
+        p_msg->p_adv_data_cback = p_adv_data_cback;
         p_msg->p_adv_cfg = p_adv_cfg;
 
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleSetStorageParams
+**
+** Description      This function is called to override the BTA scan response.
+**
+** Parameters       batch_scan_full_max -Max storage space (in %) allocated to full scanning
+**                  batch_scan_trunc_max -Max storage space (in %) allocated to truncated scanning
+**                  batch_scan_notify_threshold -Setup notification level based on total space
+**                  p_setup_cback - Setup callback pointer
+**                  p_thres_cback - Threshold callback pointer
+**                  p_rep_cback - Reports callback pointer
+**                  ref_value - Ref value
+**
+** Returns          None
+**
+*******************************************************************************/
+BTA_API extern void BTA_DmBleSetStorageParams(UINT8 batch_scan_full_max,
+                                         UINT8 batch_scan_trunc_max,
+                                         UINT8 batch_scan_notify_threshold,
+                                         tBTA_BLE_SCAN_SETUP_CBACK *p_setup_cback,
+                                         tBTA_BLE_SCAN_THRESHOLD_CBACK *p_thres_cback,
+                                         tBTA_BLE_SCAN_REP_CBACK* p_rep_cback,
+                                         tBTA_DM_BLE_REF_VALUE ref_value)
+{
+    tBTA_DM_API_SET_STORAGE_CONFIG  *p_msg;
+    bta_dm_cb.p_setup_cback = p_setup_cback;
+    if ((p_msg = (tBTA_DM_API_SET_STORAGE_CONFIG *)
+          GKI_getbuf(sizeof(tBTA_DM_API_SET_STORAGE_CONFIG))) != NULL)
+    {
+        p_msg->hdr.event = BTA_DM_API_BLE_SETUP_STORAGE_EVT;
+        p_msg->p_setup_cback=bta_ble_scan_setup_cb;
+        p_msg->p_thres_cback=p_thres_cback;
+        p_msg->p_read_rep_cback=p_rep_cback;
+        p_msg->ref_value = ref_value;
+        p_msg->batch_scan_full_max = batch_scan_full_max;
+        p_msg->batch_scan_trunc_max = batch_scan_trunc_max;
+        p_msg->batch_scan_notify_threshold = batch_scan_notify_threshold;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleEnableBatchScan
+**
+** Description      This function is called to enable the batch scan
+**
+** Parameters       scan_mode -Batch scan mode
+**                  scan_interval - Scan interval
+**                  scan_window - Scan window
+**                  discard_rule -Discard rules
+**                  addr_type - Address type
+**                  ref_value - Reference value
+**
+** Returns          None
+**
+*******************************************************************************/
+BTA_API extern void BTA_DmBleEnableBatchScan(tBTA_BLE_SCAN_MODE scan_mode,
+                                         UINT32 scan_interval, UINT32 scan_window,
+                                         tBTA_BLE_DISCARD_RULE discard_rule,
+                                         tBLE_ADDR_TYPE        addr_type,
+                                         tBTA_DM_BLE_REF_VALUE ref_value)
+{
+    tBTA_DM_API_ENABLE_SCAN  *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_ENABLE_SCAN *) GKI_getbuf(sizeof(tBTA_DM_API_ENABLE_SCAN))) != NULL)
+    {
+        p_msg->hdr.event = BTA_DM_API_BLE_ENABLE_BATCH_SCAN_EVT;
+        p_msg->scan_mode = scan_mode;
+        p_msg->scan_int = scan_interval;
+        p_msg->scan_window = scan_window;
+        p_msg->discard_rule = discard_rule;
+        p_msg->addr_type = addr_type;
+        p_msg->ref_value = ref_value;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleDisableBatchScan
+**
+** Description      This function is called to disable the batch scan
+**
+** Parameters       ref_value - Reference value
+**
+** Returns          None
+**
+*******************************************************************************/
+BTA_API extern void BTA_DmBleDisableBatchScan(tBTA_DM_BLE_REF_VALUE ref_value)
+{
+    tBTA_DM_API_DISABLE_SCAN  *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_DISABLE_SCAN *)
+         GKI_getbuf(sizeof(tBTA_DM_API_DISABLE_SCAN))) != NULL)
+    {
+        p_msg->hdr.event = BTA_DM_API_BLE_DISABLE_BATCH_SCAN_EVT;
+        p_msg->ref_value = ref_value;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleReadScanReports
+**
+** Description      This function is called to read scan reports
+**
+** Parameters       scan_type -Batch scan mode
+**                  ref_value - Reference value
+**
+** Returns          None
+**
+*******************************************************************************/
+BTA_API extern void BTA_DmBleReadScanReports(tBTA_BLE_SCAN_MODE scan_type,
+                                             tBTA_DM_BLE_REF_VALUE ref_value)
+{
+    tBTA_DM_API_READ_SCAN_REPORTS  *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_READ_SCAN_REPORTS *)
+          GKI_getbuf(sizeof(tBTA_DM_API_READ_SCAN_REPORTS))) != NULL)
+    {
+        p_msg->hdr.event = BTA_DM_API_BLE_READ_SCAN_REPORTS_EVT;
+        p_msg->scan_type = scan_type;
+        p_msg->ref_value = ref_value;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleTrackAdvertiser
+**
+** Description      This function is called to track advertiser
+**
+** Parameters       ref_value - Reference value
+**                  p_track_adv_cback - Track ADV callback
+**
+** Returns          None
+**
+*******************************************************************************/
+BTA_API extern void BTA_DmBleTrackAdvertiser(tBTA_DM_BLE_REF_VALUE ref_value,
+                            tBTA_BLE_TRACK_ADV_CBACK *p_track_adv_cback)
+{
+    tBTA_DM_API_TRACK_ADVERTISER  *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_TRACK_ADVERTISER *)
+         GKI_getbuf(sizeof(tBTA_DM_API_TRACK_ADVERTISER))) != NULL)
+    {
+        p_msg->hdr.event = BTA_DM_API_BLE_TRACK_ADVERTISER_EVT;
+        p_msg->p_track_adv_cback = p_track_adv_cback;
+        p_msg->ref_value = ref_value;
         bta_sys_sendmsg(p_msg);
     }
 }
@@ -1551,7 +1746,7 @@ BTA_API extern void BTA_DmBleBroadcast (BOOLEAN start)
 {
     tBTA_DM_API_BLE_OBSERVE   *p_msg;
 
-    APPL_TRACE_API1("BTA_DmBleBroadcast: start = %d ", start);
+    APPL_TRACE_API("BTA_DmBleBroadcast: start = %d ", start);
 
     if ((p_msg = (tBTA_DM_API_BLE_OBSERVE *) GKI_getbuf(sizeof(tBTA_DM_API_BLE_OBSERVE))) != NULL)
     {
@@ -1596,6 +1791,81 @@ void BTA_DmBleSetBgConnType(tBTA_DM_BLE_CONN_TYPE bg_conn_type, tBTA_DM_BLE_SEL_
     }
 #endif
 }
+
+/*******************************************************************************
+**
+** Function         bta_dm_discover_send_msg
+**
+** Description      This function send discover message to BTA task.
+**
+** Returns          void
+**
+*******************************************************************************/
+static void bta_dm_discover_send_msg(BD_ADDR bd_addr, tBTA_SERVICE_MASK_EXT *p_services,
+                    tBTA_DM_SEARCH_CBACK *p_cback, BOOLEAN sdp_search,
+                    tBTA_TRANSPORT transport)
+{
+    tBTA_DM_API_DISCOVER    *p_msg;
+    UINT16  len = p_services ? (sizeof(tBTA_DM_API_DISCOVER) +
+                                sizeof(tBT_UUID) * p_services->num_uuid) :
+                                sizeof(tBTA_DM_API_DISCOVER);
+
+    if ((p_msg = (tBTA_DM_API_DISCOVER *) GKI_getbuf(len)) != NULL)
+    {
+        memset(p_msg, 0, len);
+
+        p_msg->hdr.event = BTA_DM_API_DISCOVER_EVT;
+        bdcpy(p_msg->bd_addr, bd_addr);
+        p_msg->p_cback = p_cback;
+        p_msg->sdp_search = sdp_search;
+        p_msg->transport    = transport;
+
+        if (p_services != NULL)
+        {
+#if BLE_INCLUDED == TRUE && BTA_GATT_INCLUDED == TRUE
+            p_msg->services = p_services->srvc_mask;
+            p_msg->num_uuid = p_services->num_uuid;
+            if (p_services->num_uuid != 0)
+            {
+                p_msg->p_uuid = (tBT_UUID *)(p_msg + 1);
+                memcpy(p_msg->p_uuid, p_services->p_uuid, sizeof(tBT_UUID) * p_services->num_uuid);
+            }
+#endif
+        }
+
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmDiscoverByTransport
+**
+** Description      This function does service discovery on particular transport
+**                  for services of a
+**                  peer device. When services.num_uuid is 0, it indicates all
+**                  GATT based services are to be searched; otherwise a list of
+**                  UUID of interested services should be provided through
+**                  p_services->p_uuid.
+**
+** Parameters       bd_addr: Bluetooth address of remote device
+**                  p_services :bit mask of the list of services to be discovered
+**                  p_cback : Callback on which result will be received
+**                  sdp_search: if TRUE SDP search will be initiated, else services present in
+**                                     EIR structure of remote device will be returned.
+**                  transport : Physical transport BR/EDR or LE
+** Returns          void
+**
+*******************************************************************************/
+
+void BTA_DmDiscoverByTransport(BD_ADDR bd_addr, tBTA_SERVICE_MASK_EXT *p_services,
+                    tBTA_DM_SEARCH_CBACK *p_cback, BOOLEAN sdp_search,
+                    tBTA_TRANSPORT transport)
+{
+    bta_dm_discover_send_msg(bd_addr, p_services, p_cback, sdp_search, transport);
+}
+
+
 /*******************************************************************************
 **
 ** Function         BTA_DmDiscoverExt
@@ -1606,7 +1876,11 @@ void BTA_DmBleSetBgConnType(tBTA_DM_BLE_CONN_TYPE bg_conn_type, tBTA_DM_BLE_SEL_
 **                  UUID of interested services should be provided through
 **                  p_services->p_uuid.
 **
-**
+** Parameters       bd_addr: Bluetooth address of remote device
+**                  p_services :bit mask of the list of services to be discovered
+**                  p_cback : Callback on which result will be received
+**                  sdp_search: if TRUE SDP search will be initiated, else services present in
+**                                     EIR structure of remote device will be returned.
 **
 ** Returns          void
 **
@@ -1614,35 +1888,7 @@ void BTA_DmBleSetBgConnType(tBTA_DM_BLE_CONN_TYPE bg_conn_type, tBTA_DM_BLE_SEL_
 void BTA_DmDiscoverExt(BD_ADDR bd_addr, tBTA_SERVICE_MASK_EXT *p_services,
                     tBTA_DM_SEARCH_CBACK *p_cback, BOOLEAN sdp_search)
 {
-#if BLE_INCLUDED == TRUE && BTA_GATT_INCLUDED == TRUE
-    tBTA_DM_API_DISCOVER    *p_msg;
-    UINT16  len = p_services ? (sizeof(tBTA_DM_API_DISCOVER) + sizeof(tBT_UUID) * p_services->num_uuid) :
-                    sizeof(tBTA_DM_API_DISCOVER);
-
-    if ((p_msg = (tBTA_DM_API_DISCOVER *) GKI_getbuf(len)) != NULL)
-    {
-        memset(p_msg, 0, len);
-
-        p_msg->hdr.event = BTA_DM_API_DISCOVER_EVT;
-        bdcpy(p_msg->bd_addr, bd_addr);
-        p_msg->p_cback = p_cback;
-        p_msg->sdp_search = sdp_search;
-
-        if (p_services != NULL)
-        {
-            p_msg->services = p_services->srvc_mask;
-            p_msg->num_uuid = p_services->num_uuid;
-
-            if (p_services->num_uuid != 0)
-            {
-                p_msg->p_uuid = (tBT_UUID *)(p_msg + 1);
-                memcpy(p_msg->p_uuid, p_services->p_uuid, sizeof(tBT_UUID) * p_services->num_uuid);
-            }
-        }
-
-        bta_sys_sendmsg(p_msg);
-    }
-#endif
+    bta_dm_discover_send_msg(bd_addr, p_services, p_cback, sdp_search, BTA_TRANSPORT_UNKNOWN);
 
 }
 
@@ -1698,6 +1944,10 @@ void BTA_DmSearchExt(tBTA_DM_INQ *p_dm_inq, tBTA_SERVICE_MASK_EXT *p_services, t
 
         bta_sys_sendmsg(p_msg);
     }
+#else
+    UNUSED(p_dm_inq);
+    UNUSED(p_services);
+    UNUSED(p_cback);
 #endif
 }
 
@@ -1715,8 +1965,8 @@ void BTA_DmSearchExt(tBTA_DM_INQ *p_dm_inq, tBTA_SERVICE_MASK_EXT *p_services, t
 *******************************************************************************/
 void BTA_DmBleEnableRemotePrivacy(BD_ADDR bd_addr, BOOLEAN privacy_enable)
 {
-#if BLE_INCLUDED == TRUE
-#endif
+    UNUSED(bd_addr);
+    UNUSED(privacy_enable);
 }
 
 
@@ -1733,10 +1983,456 @@ void BTA_DmBleEnableRemotePrivacy(BD_ADDR bd_addr, BOOLEAN privacy_enable)
 *******************************************************************************/
 void BTA_DmBleConfigLocalPrivacy(BOOLEAN privacy_enable)
 {
-#if BLE_INCLUDED == TRUE
+#if BLE_INCLUDED == TRUE && BLE_PRIVACY_SPT == TRUE
+    tBTA_DM_API_LOCAL_PRIVACY *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_LOCAL_PRIVACY *) GKI_getbuf(sizeof(tBTA_DM_API_ENABLE_PRIVACY))) != NULL)
+    {
+        memset (p_msg, 0, sizeof(tBTA_DM_API_LOCAL_PRIVACY));
+
+        p_msg->hdr.event = BTA_DM_API_LOCAL_PRIVACY_EVT;
+        p_msg->privacy_enable   = privacy_enable;
+
+        bta_sys_sendmsg(p_msg);
+    }
+#else
+    UNUSED (privacy_enable);
 #endif
 }
 
+#if BLE_INCLUDED == TRUE
+/*******************************************************************************
+**
+** Function         BTA_BleEnableAdvInstance
+**
+** Description      This function enable a Multi-ADV instance with the specififed
+**                  adv parameters
+**
+** Parameters       p_params: pointer to the adv parameter structure.
+**                  p_cback: callback function associated to this adv instance.
+**                  p_ref: reference data pointer to this adv instance.
+**
+** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+**
+*******************************************************************************/
+void BTA_BleEnableAdvInstance (tBTA_BLE_ADV_PARAMS *p_params,
+                                tBTA_BLE_MULTI_ADV_CBACK *p_cback,
+                                void *p_ref)
+{
+    tBTA_DM_API_BLE_MULTI_ADV_ENB    *p_msg;
+    UINT16 len = sizeof(tBTA_BLE_ADV_PARAMS) + sizeof(tBTA_DM_API_BLE_MULTI_ADV_ENB);
+
+    APPL_TRACE_API ("BTA_BleEnableAdvInstance");
+
+    if ((p_msg = (tBTA_DM_API_BLE_MULTI_ADV_ENB *) GKI_getbuf(len)) != NULL)
+    {
+        memset(p_msg, 0, sizeof(tBTA_DM_API_BLE_MULTI_ADV_ENB));
+
+        p_msg->hdr.event     = BTA_DM_API_BLE_MULTI_ADV_ENB_EVT;
+        p_msg->p_cback      = (void *)p_cback;
+        if (p_params != NULL)
+        {
+            p_msg->p_params =  (void *)(p_msg + 1);
+            memcpy(p_msg->p_params, p_params, sizeof(tBTA_BLE_ADV_PARAMS));
+        }
+        p_msg->p_ref        = p_ref;
+
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_BleUpdateAdvInstParam
+**
+** Description      This function update a Multi-ADV instance with the specififed
+**                  adv parameters.
+**
+** Parameters       inst_id: Adv instance to update the parameter.
+**                  p_params: pointer to the adv parameter structure.
+**
+** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+**
+*******************************************************************************/
+void BTA_BleUpdateAdvInstParam (UINT8 inst_id, tBTA_BLE_ADV_PARAMS *p_params)
+{
+    tBTA_DM_API_BLE_MULTI_ADV_PARAM    *p_msg;
+    UINT16      len = sizeof(tBTA_BLE_ADV_PARAMS) + sizeof(tBTA_DM_API_BLE_MULTI_ADV_PARAM);
+
+    APPL_TRACE_API ("BTA_BleUpdateAdvInstParam");
+     if ((p_msg = (tBTA_DM_API_BLE_MULTI_ADV_PARAM *) GKI_getbuf(len)) != NULL)
+     {
+          memset(p_msg, 0, sizeof(tBTA_DM_API_BLE_MULTI_ADV_PARAM));
+          p_msg->hdr.event     = BTA_DM_API_BLE_MULTI_ADV_PARAM_UPD_EVT;
+          p_msg->inst_id        = inst_id;
+          p_msg->p_params =  (void *)(p_msg + 1);
+          memcpy(p_msg->p_params, p_params, sizeof(tBTA_BLE_ADV_PARAMS));
+
+          bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_BleCfgAdvInstData
+**
+** Description      This function configure a Multi-ADV instance with the specififed
+**                  adv data or scan response data.
+**
+** Parameter        inst_id: Adv instance to configure the adv data or scan response.
+**                  is_scan_rsp: is the data scan response or adv data.
+**                  data_mask: adv data type as bit mask.
+**                  p_data: pointer to the ADV data structure tBTA_BLE_ADV_DATA. This
+**                  memory space can not be freed until BTA_BLE_MULTI_ADV_DATA_EVT
+**                  is sent to application.
+**
+** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+**
+*******************************************************************************/
+void BTA_BleCfgAdvInstData (UINT8 inst_id, BOOLEAN is_scan_rsp,
+                            tBTA_BLE_AD_MASK data_mask,
+                            tBTA_BLE_ADV_DATA *p_data)
+{
+    tBTA_DM_API_BLE_MULTI_ADV_DATA    *p_msg;
+    UINT16      len =  sizeof(tBTA_DM_API_BLE_MULTI_ADV_DATA) ;
+
+    APPL_TRACE_API ("BTA_BleCfgAdvInstData");
+
+    if ((p_msg = (tBTA_DM_API_BLE_MULTI_ADV_DATA *) GKI_getbuf(len)) != NULL)
+    {
+          memset(p_msg, 0, len);
+          p_msg->hdr.event     = BTA_DM_API_BLE_MULTI_ADV_DATA_EVT;
+          p_msg->inst_id      = inst_id;
+          p_msg->is_scan_rsp  = is_scan_rsp;
+          p_msg->data_mask     = data_mask;
+          p_msg->p_data        = p_data;
+
+          bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_BleDisableAdvInstance
+**
+** Description      This function disable a Multi-ADV instance.
+**
+** Parameter        inst_id: instance ID to disable.
+**
+** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+**
+*******************************************************************************/
+void BTA_BleDisableAdvInstance (UINT8  inst_id)
+{
+    tBTA_DM_API_BLE_MULTI_ADV_DISABLE    *p_msg;
+
+    APPL_TRACE_API ("BTA_BleDisableAdvInstance: %d", inst_id);
+    if ((p_msg = (tBTA_DM_API_BLE_MULTI_ADV_DISABLE *)
+          GKI_getbuf(sizeof(tBTA_DM_API_BLE_MULTI_ADV_DISABLE))) != NULL)
+    {
+         memset(p_msg, 0, sizeof(tBTA_DM_API_BLE_MULTI_ADV_DISABLE));
+         p_msg->hdr.event    = BTA_DM_API_BLE_MULTI_ADV_DISABLE_EVT;
+         p_msg->inst_id      = inst_id;
+         bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleCfgFilterCondition
+**
+** Description      This function is called to configure the adv data payload filter
+**                  condition.
+**
+** Parameters       action: to read/write/clear
+**                  cond_type: filter condition type
+**                  filt_index - Filter index
+**                  p_cond: filter condition parameter
+**                  p_cmpl_back - Command completed callback
+**                  ref_value - Reference value
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmBleCfgFilterCondition(tBTA_DM_BLE_SCAN_COND_OP action,
+                                 tBTA_DM_BLE_PF_COND_TYPE cond_type,
+                                 tBTA_DM_BLE_PF_FILT_INDEX filt_index,
+                                 tBTA_DM_BLE_PF_COND_PARAM *p_cond,
+                                 tBTA_DM_BLE_PF_CFG_CBACK *p_cmpl_cback,
+                                 tBTA_DM_BLE_REF_VALUE ref_value)
+{
+#if BLE_ANDROID_CONTROLLER_SCAN_FILTER == TRUE
+    tBTA_DM_API_CFG_FILTER_COND *p_msg;
+    APPL_TRACE_API ("BTA_DmBleCfgFilterCondition: %d, %d", action, cond_type);
+
+    UINT16  len = sizeof(tBTA_DM_API_CFG_FILTER_COND) +
+                  sizeof(tBTA_DM_BLE_PF_COND_PARAM);
+    UINT8 *p;
+
+    if (NULL != p_cond)
+    {
+        switch(cond_type)
+        {
+            case BTA_DM_BLE_PF_SRVC_DATA_PATTERN:
+            case BTA_DM_BLE_PF_MANU_DATA:
+                /* Length of pattern and pattern mask and other elements in */
+                /* tBTA_DM_BLE_PF_MANU_COND */
+                len += ((p_cond->manu_data.data_len) * 2) +
+                        sizeof(UINT16) + sizeof(UINT16) + sizeof(UINT8);
+                break;
+
+            case BTA_DM_BLE_PF_LOCAL_NAME:
+                len += ((p_cond->local_name.data_len) + sizeof(UINT8));
+                break;
+
+            case BTM_BLE_PF_SRVC_UUID:
+            case BTM_BLE_PF_SRVC_SOL_UUID:
+                len += sizeof(tBLE_BD_ADDR) + sizeof(tBTA_DM_BLE_PF_COND_MASK);
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    if ((p_msg = (tBTA_DM_API_CFG_FILTER_COND *) GKI_getbuf(len)) != NULL)
+    {
+        memset (p_msg, 0, len);
+        p_msg->hdr.event        = BTA_DM_API_CFG_FILTER_COND_EVT;
+        p_msg->action           = action;
+        p_msg->cond_type        = cond_type;
+        p_msg->filt_index       = filt_index;
+        p_msg->p_filt_cfg_cback = p_cmpl_cback;
+        p_msg->ref_value        = ref_value;
+
+        if (p_cond)
+        {
+            p_msg->p_cond_param = (tBTA_DM_BLE_PF_COND_PARAM *)(p_msg + 1);
+            memcpy(p_msg->p_cond_param, p_cond, sizeof(tBTA_DM_BLE_PF_COND_PARAM));
+
+            p = (UINT8 *)(p_msg->p_cond_param + 1);
+
+            if (cond_type == BTA_DM_BLE_PF_SRVC_DATA_PATTERN ||
+                cond_type == BTA_DM_BLE_PF_MANU_DATA)
+            {
+                p_msg->p_cond_param->manu_data.p_pattern = p;
+                p_msg->p_cond_param->manu_data.data_len = p_cond->manu_data.data_len;
+                memcpy(p_msg->p_cond_param->manu_data.p_pattern, p_cond->manu_data.p_pattern,
+                    p_cond->manu_data.data_len);
+                p += p_cond->manu_data.data_len;
+
+                if (cond_type == BTA_DM_BLE_PF_MANU_DATA)
+                {
+                    p_msg->p_cond_param->manu_data.company_id_mask =
+                        p_cond->manu_data.company_id_mask;
+                    if ( p_cond->manu_data.p_pattern_mask != NULL)
+                    {
+                        p_msg->p_cond_param->manu_data.p_pattern_mask = p;
+                        memcpy(p_msg->p_cond_param->manu_data.p_pattern_mask,
+                            p_cond->manu_data.p_pattern_mask, p_cond->manu_data.data_len);
+                    }
+                }
+            }
+            else if (cond_type == BTA_DM_BLE_PF_LOCAL_NAME)
+            {
+                p_msg->p_cond_param->local_name.p_data = p;
+                p_msg->p_cond_param->local_name.data_len =
+                    p_cond->local_name.data_len;
+                memcpy(p_msg->p_cond_param->local_name.p_data,
+                    p_cond->local_name.p_data, p_cond->local_name.data_len);
+            }
+            else if ((cond_type == BTM_BLE_PF_SRVC_UUID
+                || cond_type == BTM_BLE_PF_SRVC_SOL_UUID))
+            {
+                if (p_cond->srvc_uuid.p_target_addr != NULL)
+                {
+                    p_msg->p_cond_param->srvc_uuid.p_target_addr = (tBLE_BD_ADDR *)(p);
+                    p_msg->p_cond_param->srvc_uuid.p_target_addr->type =
+                        p_cond->srvc_uuid.p_target_addr->type;
+                    memcpy(p_msg->p_cond_param->srvc_uuid.p_target_addr->bda,
+                        p_cond->srvc_uuid.p_target_addr->bda, BD_ADDR_LEN);
+                    p = (UINT8*)( p_msg->p_cond_param->srvc_uuid.p_target_addr + 1);
+                }
+                if (p_cond->srvc_uuid.p_uuid_mask)
+                {
+                    p_msg->p_cond_param->srvc_uuid.p_uuid_mask = (tBTA_DM_BLE_PF_COND_MASK *)p;
+                    memcpy(p_msg->p_cond_param->srvc_uuid.p_uuid_mask,
+                        p_cond->srvc_uuid.p_uuid_mask, sizeof(tBTA_DM_BLE_PF_COND_MASK));
+                }
+            }
+        }
+
+        bta_sys_sendmsg(p_msg);
+    }
+#else
+    UNUSED(action);
+    UNUSED(cond_type);
+    UNUSED(filt_index);
+    UNUSED(p_cond);
+    UNUSED(p_cmpl_cback);
+    UNUSED(ref_value);
+#endif
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleScanFilterSetup
+**
+** Description      This function is called to setup the adv data payload filter param
+**
+** Parameters       p_target: enable the filter condition on a target device; if NULL
+**                  filt_index - Filter index
+**                  p_filt_params -Filter parameters
+**                  ref_value - Reference value
+**                  action - Add, delete or clear
+**                  p_cmpl_back - Command completed callback
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmBleScanFilterSetup(UINT8 action, tBTA_DM_BLE_PF_FILT_INDEX filt_index,
+                                    tBTA_DM_BLE_PF_FILT_PARAMS *p_filt_params,
+                                    tBLE_BD_ADDR *p_target,
+                                    tBTA_DM_BLE_PF_PARAM_CBACK *p_cmpl_cback,
+                                    tBTA_DM_BLE_REF_VALUE ref_value)
+{
+#if BLE_ANDROID_CONTROLLER_SCAN_FILTER == TRUE
+    tBTA_DM_API_SCAN_FILTER_PARAM_SETUP *p_msg;
+    APPL_TRACE_API ("BTA_DmBleScanFilterSetup: %d", action);
+
+    UINT16  len = sizeof(tBTA_DM_API_SCAN_FILTER_PARAM_SETUP) + sizeof(tBLE_BD_ADDR);
+
+    if ((p_msg = (tBTA_DM_API_SCAN_FILTER_PARAM_SETUP *) GKI_getbuf(len)) != NULL)
+    {
+        memset (p_msg, 0, len);
+
+        p_msg->hdr.event        = BTA_DM_API_SCAN_FILTER_SETUP_EVT;
+        p_msg->action       = action;
+        p_msg->filt_index = filt_index;
+        p_msg->p_filt_params = p_filt_params;
+        p_msg->p_filt_param_cback = p_cmpl_cback;
+        p_msg->ref_value        = ref_value;
+
+        if (p_target)
+        {
+            p_msg->p_target = (tBLE_BD_ADDR *)(p_msg + 1);
+            memcpy(p_msg->p_target, p_target, sizeof(tBLE_BD_ADDR));
+        }
+
+        bta_sys_sendmsg(p_msg);
+    }
+#else
+    UNUSED(action);
+    UNUSED(filt_index);
+    UNUSED(p_filt_params);
+    UNUSED(p_target);
+    UNUSED(p_cmpl_cback);
+    UNUSED(ref_value);
+#endif
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleGetEnergyInfo
+**
+** Description      This function is called to obtain the energy info
+**
+** Parameters       p_cmpl_cback - Command complete callback
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmBleGetEnergyInfo(tBTA_BLE_ENERGY_INFO_CBACK *p_cmpl_cback)
+{
+    tBTA_DM_API_ENERGY_INFO *p_msg;
+    APPL_TRACE_API ("BTA_DmBleGetEnergyInfo");
+
+    UINT16  len = sizeof(tBTA_DM_API_ENERGY_INFO) + sizeof(tBLE_BD_ADDR);
+
+    if ((p_msg = (tBTA_DM_API_ENERGY_INFO *) GKI_getbuf(len)) != NULL)
+    {
+        memset (p_msg, 0, len);
+        p_msg->hdr.event        = BTA_DM_API_BLE_ENERGY_INFO_EVT;
+        p_msg->p_energy_info_cback = p_cmpl_cback;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmEnableScanFilter
+**
+** Description      This function is called to enable the adv data payload filter
+**
+** Parameters       action - enable or disable the APCF feature
+**                  p_cmpl_cback - Command completed callback
+**                  ref_value - Reference value
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmEnableScanFilter(UINT8 action, tBTA_DM_BLE_PF_STATUS_CBACK *p_cmpl_cback,
+                                    tBTA_DM_BLE_REF_VALUE ref_value)
+{
+#if BLE_ANDROID_CONTROLLER_SCAN_FILTER == TRUE
+    tBTA_DM_API_ENABLE_SCAN_FILTER *p_msg;
+    APPL_TRACE_API ("BTA_DmEnableScanFilter: %d", action);
+
+    UINT16  len = sizeof(tBTA_DM_API_ENABLE_SCAN_FILTER) + sizeof(tBLE_BD_ADDR);
+
+    if ((p_msg = (tBTA_DM_API_ENABLE_SCAN_FILTER *) GKI_getbuf(len)) != NULL)
+    {
+        memset (p_msg, 0, len);
+
+        p_msg->hdr.event        = BTA_DM_API_SCAN_FILTER_ENABLE_EVT;
+        p_msg->action       = action;
+        p_msg->ref_value    = ref_value;
+        p_msg->p_filt_status_cback = p_cmpl_cback;
+
+        bta_sys_sendmsg(p_msg);
+    }
+#else
+    UNUSED(action);
+    UNUSED(p_cmpl_cback);
+    UNUSED(ref_value);
+#endif
+}
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleUpdateConnectionParams
+**
+** Description      Update connection parameters, can only be used when connection is up.
+**
+** Parameters:      bd_addr   - BD address of the peer
+**                  min_int   -     minimum connection interval, [0x0004~ 0x4000]
+**                  max_int   -     maximum connection interval, [0x0004~ 0x4000]
+**                  latency   -     slave latency [0 ~ 500]
+**                  timeout   -     supervision timeout [0x000a ~ 0xc80]
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmBleUpdateConnectionParams(BD_ADDR bd_addr, UINT16 min_int, UINT16 max_int,
+                                    UINT16 latency, UINT16 timeout)
+{
+    tBTA_DM_API_UPDATE_CONN_PARAM *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_UPDATE_CONN_PARAM *) GKI_getbuf(sizeof(tBTA_DM_API_UPDATE_CONN_PARAM))) != NULL)
+    {
+        memset (p_msg, 0, sizeof(tBTA_DM_API_UPDATE_CONN_PARAM));
+
+        p_msg->hdr.event = BTA_DM_API_UPDATE_CONN_PARAM_EVT;
+        bdcpy(p_msg->bd_addr, bd_addr);
+        p_msg->min_int   = min_int;
+        p_msg->max_int   = max_int;
+        p_msg->latency   = latency;
+        p_msg->timeout   = timeout;
+
+        bta_sys_sendmsg(p_msg);
+    }
+}
+#endif
 
 /*******************************************************************************
 **
@@ -1748,6 +2444,7 @@ void BTA_DmBleConfigLocalPrivacy(BOOLEAN privacy_enable)
 **                  bring up unencrypted links, then later encrypt them.
 **
 ** Parameters:      bd_addr       - Address of the peer device
+**                  transport     - transport of the link to be encruypted
 **                  p_callback    - Pointer to callback function to indicat the
 **                                  link encryption status
 **                  sec_act       - This is the security action to indicate
@@ -1759,12 +2456,12 @@ void BTA_DmBleConfigLocalPrivacy(BOOLEAN privacy_enable)
 ** Returns          void
 **
 *******************************************************************************/
-void BTA_DmSetEncryption(BD_ADDR bd_addr, tBTA_DM_ENCRYPT_CBACK *p_callback,
+void BTA_DmSetEncryption(BD_ADDR bd_addr, tBTA_TRANSPORT transport, tBTA_DM_ENCRYPT_CBACK *p_callback,
                             tBTA_DM_BLE_SEC_ACT sec_act)
 {
     tBTA_DM_API_SET_ENCRYPTION   *p_msg;
 
-    APPL_TRACE_API0("BTA_DmSetEncryption"); //todo
+    APPL_TRACE_API("BTA_DmSetEncryption"); //todo
     if ((p_msg = (tBTA_DM_API_SET_ENCRYPTION *) GKI_getbuf(sizeof(tBTA_DM_API_SET_ENCRYPTION))) != NULL)
     {
         memset(p_msg, 0, sizeof(tBTA_DM_API_SET_ENCRYPTION));
@@ -1772,6 +2469,7 @@ void BTA_DmSetEncryption(BD_ADDR bd_addr, tBTA_DM_ENCRYPT_CBACK *p_callback,
         p_msg->hdr.event = BTA_DM_API_SET_ENCRYPTION_EVT;
 
         memcpy(p_msg->bd_addr, bd_addr, BD_ADDR_LEN);
+        p_msg->transport    = transport;
         p_msg->p_callback      = p_callback;
         p_msg->sec_act         = sec_act;
 
@@ -1792,11 +2490,11 @@ void BTA_DmSetEncryption(BD_ADDR bd_addr, tBTA_DM_ENCRYPT_CBACK *p_callback,
 ** Returns          void
 **
 *******************************************************************************/
-void BTA_DmCloseACL(BD_ADDR bd_addr, BOOLEAN remove_dev)
+void BTA_DmCloseACL(BD_ADDR bd_addr, BOOLEAN remove_dev, tBTA_TRANSPORT transport)
 {
     tBTA_DM_API_REMOVE_ACL   *p_msg;
 
-    APPL_TRACE_API0("BTA_DmCloseACL");
+    APPL_TRACE_API("BTA_DmCloseACL");
 
     if ((p_msg = (tBTA_DM_API_REMOVE_ACL *) GKI_getbuf(sizeof(tBTA_DM_API_REMOVE_ACL))) != NULL)
     {
@@ -1806,11 +2504,13 @@ void BTA_DmCloseACL(BD_ADDR bd_addr, BOOLEAN remove_dev)
 
         memcpy(p_msg->bd_addr, bd_addr, BD_ADDR_LEN);
         p_msg->remove_dev      = remove_dev;
+        p_msg->transport       = transport;
 
         bta_sys_sendmsg(p_msg);
     }
 }
 
+#if BLE_INCLUDED == TRUE
 /*******************************************************************************
 **
 ** Function         BTA_DmBleObserve
@@ -1829,11 +2529,9 @@ void BTA_DmCloseACL(BD_ADDR bd_addr, BOOLEAN remove_dev)
 BTA_API extern void BTA_DmBleObserve(BOOLEAN start, UINT8 duration,
                                      tBTA_DM_SEARCH_CBACK *p_results_cb)
 {
-#if BLE_INCLUDED == TRUE
-
     tBTA_DM_API_BLE_OBSERVE   *p_msg;
 
-    APPL_TRACE_API1("BTA_DmBleObserve:start = %d ", start);
+    APPL_TRACE_API("BTA_DmBleObserve:start = %d ", start);
 
     if ((p_msg = (tBTA_DM_API_BLE_OBSERVE *) GKI_getbuf(sizeof(tBTA_DM_API_BLE_OBSERVE))) != NULL)
     {
@@ -1846,7 +2544,49 @@ BTA_API extern void BTA_DmBleObserve(BOOLEAN start, UINT8 duration,
 
         bta_sys_sendmsg(p_msg);
     }
-#endif
 }
 
+/*******************************************************************************
+**
+** Function         BTA_VendorInit
+**
+** Description      This function initializes vendor specific
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_VendorInit (void)
+{
+    APPL_TRACE_API("BTA_VendorInit");
+}
 
+/*******************************************************************************
+**
+** Function         BTA_VendorCleanup
+**
+** Description      This function frees up Broadcom specific VS specific dynamic memory
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_VendorCleanup (void)
+{
+    tBTM_BLE_VSC_CB cmn_ble_vsc_cb;
+    BTM_BleGetVendorCapabilities(&cmn_ble_vsc_cb);
+
+#if (BLE_INCLUDED == TRUE && BLE_ANDROID_CONTROLLER_SCAN_FILTER == TRUE)
+    if (cmn_ble_vsc_cb.max_filter > 0)
+    {
+        btm_ble_adv_filter_cleanup();
+        btm_ble_vendor_cleanup();
+    }
+
+    if (cmn_ble_vsc_cb.tot_scan_results_strg > 0)
+        btm_ble_batchscan_cleanup();
+#endif
+
+   if(cmn_ble_vsc_cb.adv_inst_max > 0)
+      btm_ble_multi_adv_cleanup();
+}
+
+#endif

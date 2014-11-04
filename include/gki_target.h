@@ -82,7 +82,7 @@
 
 /* The number of GKI timers in the software system. */
 #ifndef GKI_NUM_TIMERS
-#define GKI_NUM_TIMERS              3
+#define GKI_NUM_TIMERS              4
 #endif
 
 /* A conversion value for translating ticks to calculate GKI timer.  */
@@ -127,17 +127,6 @@
 
 #ifndef GKI_OS_TICKS_TO_SECS
 #define GKI_OS_TICKS_TO_SECS(x)   ((x) / OS_TICKS_PER_SEC))
-#endif
-
-
-/* delay in ticks before stopping system tick. */
-#ifndef GKI_DELAY_STOP_SYS_TICK
-#define GKI_DELAY_STOP_SYS_TICK     10
-#endif
-
-/* Option to guarantee no preemption during timer expiration (most system don't need this) */
-#ifndef GKI_TIMER_LIST_NOPREEMPT
-#define GKI_TIMER_LIST_NOPREEMPT    FALSE
 #endif
 
 /******************************************************************************
@@ -316,11 +305,6 @@ of order */
 #define GKI_MAX_EXCEPTION_MSGLEN    64
 #endif
 
-#ifndef GKI_SEND_MSG_FROM_ISR
-#define GKI_SEND_MSG_FROM_ISR    FALSE
-#endif
-
-
 /* The following is intended to be a reserved pool for SCO
 over HCI data and intentionally kept out of order */
 
@@ -401,23 +385,6 @@ over HCI data and intentionally kept out of order */
 #define GKI_BUF9_MAX           5
 #endif
 // btla-specific --
-
-/* GKI Trace Macros */
-#define GKI_TRACE_0(m)                          LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m)
-#define GKI_TRACE_1(m,p1)                       LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m,p1)
-#define GKI_TRACE_2(m,p1,p2)                    LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m,p1,p2)
-#define GKI_TRACE_3(m,p1,p2,p3)                 LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m,p1,p2,p3)
-#define GKI_TRACE_4(m,p1,p2,p3,p4)              LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m,p1,p2,p3,p4)
-#define GKI_TRACE_5(m,p1,p2,p3,p4,p5)           LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m,p1,p2,p3,p4,p5)
-#define GKI_TRACE_6(m,p1,p2,p3,p4,p5,p6)        LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_GENERIC,m,p1,p2,p3,p4,p5,p6)
-
-#define GKI_TRACE_ERROR_0(m)                    LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m)
-#define GKI_TRACE_ERROR_1(m,p1)                 LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m,p1)
-#define GKI_TRACE_ERROR_2(m,p1,p2)              LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m,p1,p2)
-#define GKI_TRACE_ERROR_3(m,p1,p2,p3)           LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m,p1,p2,p3)
-#define GKI_TRACE_ERROR_4(m,p1,p2,p3,p4)        LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m,p1,p2,p3,p4)
-#define GKI_TRACE_ERROR_5(m,p1,p2,p3,p4,p5)     LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m,p1,p2,p3,p4,p5)
-#define GKI_TRACE_ERROR_6(m,p1,p2,p3,p4,p5,p6)  LogMsg(TRACE_CTRL_GENERAL | TRACE_LAYER_GKI | TRACE_ORG_GKI | TRACE_TYPE_ERROR,m,p1,p2,p3,p4,p5,p6)
 
 #ifdef __cplusplus
 extern "C"

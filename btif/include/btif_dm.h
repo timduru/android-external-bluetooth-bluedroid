@@ -36,6 +36,17 @@ void bte_dm_evt(tBTA_DM_SEC_EVT event, tBTA_DM_SEC *p_data);
 void btif_dm_on_disable(void);
 
 /**
+ * Callout for handling io_capabilities request
+ */
+void btif_dm_proc_io_req(BD_ADDR bd_addr, tBTA_IO_CAP *p_io_cap, tBTA_OOB_DATA *p_oob_data,
+                      tBTA_AUTH_REQ *p_auth_req, BOOLEAN is_orig);
+/**
+ * Callout for handling io_capabilities response
+ */
+void btif_dm_proc_io_rsp(BD_ADDR bd_addr, tBTA_IO_CAP io_cap,
+                      tBTA_OOB_DATA oob_data, tBTA_AUTH_REQ auth_req);
+
+/**
  * Out-of-band functions
  */
 #if (BTM_OOB_INCLUDED == TRUE)
@@ -81,12 +92,19 @@ typedef struct
 
 typedef struct
 {
+    BT_OCTET16          irk;
+    tBLE_ADDR_TYPE      addr_type;
+    BD_ADDR             static_addr;
+}btif_dm_ble_pid_keys_t;
+
+typedef struct
+{
     BOOLEAN                   is_penc_key_rcvd;
     btif_dm_ble_penc_keys_t   penc_key;       /* received peer encryption key */
     BOOLEAN                   is_pcsrk_key_rcvd;
     btif_dm_ble_pcsrk_keys_t  pcsrk_key;       /* received peer device SRK */
     BOOLEAN                   is_pid_key_rcvd;
-    UINT8                     pid_key[BT_OCTET16_LEN];        /* peer device ID key */
+    btif_dm_ble_pid_keys_t    pid_key;        /* peer device ID key */
     BOOLEAN                   is_lenc_key_rcvd;
     btif_dm_ble_lenc_keys_t   lenc_key;       /* local encryption reproduction keys LTK = = d1(ER,DIV,0)*/
     BOOLEAN                   is_lcsrk_key_rcvd;

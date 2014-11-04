@@ -43,12 +43,10 @@
 #define GATTC_READ_VALUE_TYPE_VALUE          0x0000  /* Attribute value itself */
 #define GATTC_READ_VALUE_TYPE_AGG_FORMAT     0x2905  /* Characteristic Aggregate Format*/
 
-static char BASE_UUID[16] = {
+static unsigned char BASE_UUID[16] = {
     0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80,
     0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
-
-extern bt_status_t btif_dm_remove_bond(const bt_bdaddr_t *bd_addr);
 
 int uuidType(unsigned char* p_uuid)
 {
@@ -129,6 +127,32 @@ void btif_to_bta_response(tBTA_GATTS_RSP *p_dest, btgatt_response_t* p_src)
     p_dest->attr_value.len      = p_src->attr_value.len;
     p_dest->attr_value.offset   = p_src->attr_value.offset;
     memcpy(p_dest->attr_value.value, p_src->attr_value.value, GATT_MAX_ATTR_LEN);
+}
+
+void btif_to_bta_uuid_mask(tBTA_DM_BLE_PF_COND_MASK *p_mask, bt_uuid_t *p_src)
+{
+    char *p_byte = (char*)p_src;
+    int i = 0;
+
+    switch (uuidType(p_src->uu))
+    {
+        case LEN_UUID_16:
+            p_mask->uuid16_mask = (p_src->uu[13] << 8) + p_src->uu[12];
+            break;
+
+        case LEN_UUID_32:
+            p_mask->uuid32_mask = (p_src->uu[13] <<  8) + p_src->uu[12];
+            p_mask->uuid32_mask += (p_src->uu[15] << 24) + (p_src->uu[14] << 16);
+            break;
+
+        case LEN_UUID_128:
+            for(i = 0; i != 16; ++i)
+                p_mask->uuid128_mask[i] = p_byte[i];
+            break;
+
+        default:
+            break;
+    }
 }
 
 /*******************************************************************************
@@ -259,7 +283,7 @@ uint16_t set_read_value(btgatt_read_params_t *p_dest, tBTA_GATTC_READ *p_src)
  * Encrypted link map handling
  *******************************************************************************/
 
-static void btif_gatt_set_encryption_cb (BD_ADDR bd_addr, tBTA_STATUS result);
+static void btif_gatt_set_encryption_cb (BD_ADDR bd_addr, tBTA_TRANSPORT transport, tBTA_STATUS result);
 
 static BOOLEAN btif_gatt_is_link_encrypted (BD_ADDR bd_addr)
 {
@@ -269,14 +293,14 @@ static BOOLEAN btif_gatt_is_link_encrypted (BD_ADDR bd_addr)
     return BTA_JvIsEncrypted(bd_addr);
 }
 
-static void btif_gatt_set_encryption_cb (BD_ADDR bd_addr, tBTA_STATUS result)
+static void btif_gatt_set_encryption_cb (BD_ADDR bd_addr, tBTA_TRANSPORT transport, tBTA_STATUS result)
 {
-    if (result != BTA_SUCCESS)
-    {
-        bt_bdaddr_t bda;
-        bdcpy(bda.address, bd_addr);
+    UNUSED(bd_addr);
+    UNUSED(transport);
 
-        btif_dm_remove_bond(&bda);
+    if (result != BTA_SUCCESS && result != BTA_BUSY)
+    {
+        BTIF_TRACE_WARNING("%s() - Encryption failed (%d)", __FUNCTION__, result);
     }
 }
 
@@ -286,14 +310,39 @@ void btif_gatt_check_encrypted_link (BD_ADDR bd_addr)
 
     bt_bdaddr_t bda;
     bdcpy(bda.address, bd_addr);
+    int device_type = 0;
+    int addr_type = 0;
 
+#if (!defined(BLE_DELAY_REQUEST_ENC) || (BLE_DELAY_REQUEST_ENC == FALSE))
     if ((btif_storage_get_ble_bonding_key(&bda, BTIF_DM_LE_KEY_PENC,
                     buf, sizeof(btif_dm_ble_penc_keys_t)) == BT_STATUS_SUCCESS)
         && !btif_gatt_is_link_encrypted(bd_addr))
     {
-        BTA_DmSetEncryption(bd_addr,
+        tBTA_GATT_TRANSPORT transport = BTA_GATT_TRANSPORT_LE;
+
+        btif_get_device_type(bd_addr, &addr_type, &device_type);
+        switch(device_type)
+        {
+            case BT_DEVICE_TYPE_BREDR:
+                transport = BTA_GATT_TRANSPORT_BR_EDR;
+                break;
+
+            case BT_DEVICE_TYPE_BLE:
+                transport = BTA_GATT_TRANSPORT_LE;
+                break;
+
+            case BT_DEVICE_TYPE_DUMO:
+                transport = BTA_GATT_TRANSPORT_LE_BR_EDR;
+                break;
+
+            default:
+                BTIF_TRACE_ERROR (" GATT Encrypt :Invalid device type %d",device_type);
+                return;
+        }
+        BTA_DmSetEncryption(bd_addr,transport,
                             &btif_gatt_set_encryption_cb, BTM_BLE_SEC_ENCRYPT);
     }
+#endif
 }
 
 /*******************************************************************************

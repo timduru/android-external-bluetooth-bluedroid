@@ -63,9 +63,7 @@ void BTA_HlEnable(tBTA_HL_CTRL_CBACK *p_ctrl_cback)
     tBTA_HL_API_ENABLE *p_buf;
 
     /* register with BTA system manager */
-    GKI_sched_lock();
     bta_sys_register(BTA_ID_HL, &bta_hl_reg);
-    GKI_sched_unlock();
 
     if ((p_buf = (tBTA_HL_API_ENABLE *)GKI_getbuf(sizeof(tBTA_HL_API_ENABLE))) != NULL)
     {
@@ -116,7 +114,7 @@ void BTA_HlUpdate(UINT8  app_id,
 {
     tBTA_HL_API_UPDATE *p_buf;
 
-    APPL_TRACE_DEBUG0("BTA_HlUpdate");
+    APPL_TRACE_DEBUG("BTA_HlUpdate");
     if (is_register)
     {
 

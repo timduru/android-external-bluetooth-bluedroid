@@ -34,7 +34,7 @@
 
 
 
-static void smp_connect_cback (BD_ADDR bd_addr, BOOLEAN connected, UINT16 reason);
+static void smp_connect_cback (BD_ADDR bd_addr, BOOLEAN connected, UINT16 reason, tBT_TRANSPORT transport);
 static void smp_data_ind (BD_ADDR bd_addr, BT_HDR *p_buf);
 
 /*******************************************************************************
@@ -48,7 +48,7 @@ static void smp_data_ind (BD_ADDR bd_addr, BT_HDR *p_buf);
 void smp_l2cap_if_init (void)
 {
     tL2CAP_FIXED_CHNL_REG  fixed_reg;
-    SMP_TRACE_EVENT0 ("SMDBG l2c smp_l2cap_if_init");
+    SMP_TRACE_EVENT ("SMDBG l2c smp_l2cap_if_init");
     fixed_reg.fixed_chnl_opts.mode         = L2CAP_FCR_BASIC_MODE;
     fixed_reg.fixed_chnl_opts.max_transmit = 0;
     fixed_reg.fixed_chnl_opts.rtrans_tout  = 0;
@@ -58,6 +58,7 @@ void smp_l2cap_if_init (void)
 
     fixed_reg.pL2CA_FixedConn_Cb = smp_connect_cback;
     fixed_reg.pL2CA_FixedData_Cb = smp_data_ind;
+    fixed_reg.pL2CA_FixedCong_Cb = NULL;    /* do not handle congestion on this channel */
     fixed_reg.default_idle_tout  = 60;      /* set 60 seconds timeout, 0xffff default idle timeout */
 
     /* Now, register with L2CAP */
@@ -73,16 +74,23 @@ void smp_l2cap_if_init (void)
 **                      connected (conn = TRUE)/disconnected (conn = FALSE).
 **
 *******************************************************************************/
-static void smp_connect_cback (BD_ADDR bd_addr, BOOLEAN connected, UINT16 reason)
+static void smp_connect_cback (BD_ADDR bd_addr, BOOLEAN connected, UINT16 reason,
+                                    tBT_TRANSPORT transport)
 {
     tSMP_CB   *p_cb = &smp_cb;
     tSMP_INT_DATA   int_data;
 
-    SMP_TRACE_EVENT0 ("SMDBG l2c smp_connect_cback ");
+    SMP_TRACE_EVENT ("SMDBG l2c smp_connect_cback ");
+
+    if (transport == BT_TRANSPORT_BR_EDR)
+    {
+        SMP_TRACE_ERROR ("smp_connect_cback : Wrong transport");
+        return;
+    }
 
     if (memcmp(bd_addr, p_cb->pairing_bda, BD_ADDR_LEN) == 0)
     {
-        SMP_TRACE_EVENT3 ("smp_connect_cback()  for pairing BDA: %08x%04x  Event: %s",
+        SMP_TRACE_EVENT ("smp_connect_cback()  for pairing BDA: %08x%04x  Event: %s",
                         (bd_addr[0]<<24)+(bd_addr[1]<<16)+(bd_addr[2]<<8) + bd_addr[3],
                         (bd_addr[4]<<8)+bd_addr[5], (connected) ? "connected" : "disconnected");
 
@@ -126,12 +134,19 @@ static void smp_data_ind (BD_ADDR bd_addr, BT_HDR *p_buf)
     tSMP_CB *p_cb = &smp_cb;
     UINT8   *p = (UINT8 *)(p_buf + 1) + p_buf->offset;
     UINT8   cmd ;
-    SMP_TRACE_EVENT0 ("SMDBG l2c smp_data_ind");
+    SMP_TRACE_EVENT ("SMDBG l2c smp_data_ind");
 
-    SMP_TRACE_EVENT0 ("Got smp_data_ind");
+    SMP_TRACE_EVENT ("Got smp_data_ind");
 
     STREAM_TO_UINT8(cmd, p);
 
+    /* sanity check */
+    if ((SMP_OPCODE_MAX <= cmd) || (cmd == 0))
+    {
+        SMP_TRACE_WARNING( "Ignore received command with RESERVED code 0x%02x", cmd);
+        GKI_freebuf (p_buf);
+        return;
+    }
 
     /* reject the pairing request if there is an on-going SMP pairing */
     if (SMP_OPCODE_PAIRING_REQ == cmd || SMP_OPCODE_SEC_REQ == cmd)
@@ -143,14 +158,23 @@ static void smp_data_ind (BD_ADDR bd_addr, BT_HDR *p_buf)
         }
         else if (memcmp(&bd_addr[0], p_cb->pairing_bda, BD_ADDR_LEN))
         {
-            p_cb->failure = SMP_PAIR_NOT_SUPPORT;
-            smp_send_cmd(SMP_OPCODE_PAIRING_FAILED, p_cb);
+            GKI_freebuf (p_buf);
+            smp_reject_unexp_pair_req(bd_addr);
+            return;
         }
+        /* else, out of state pairing request/security request received, passed into SM */
     }
 
     if (memcmp(&bd_addr[0], p_cb->pairing_bda, BD_ADDR_LEN) == 0)
     {
-        btu_stop_timer (&p_cb->rsp_timer_ent);
+        if (p_cb->state != SMP_ST_RELEASE_DELAY)
+        {
+            btu_stop_timer (&p_cb->rsp_timer_ent);
+            btu_start_timer (&p_cb->rsp_timer_ent, BTU_TTYPE_SMP_PAIRING_CMD,
+                             SMP_WAIT_FOR_RSP_TOUT);
+        }
+        p_cb->rcvd_cmd_code = cmd;
+        p_cb->rcvd_cmd_len = (UINT8) p_buf->len;
         smp_sm_event(p_cb, cmd, p);
     }
 

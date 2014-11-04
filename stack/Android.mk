@@ -1,5 +1,3 @@
-ifneq ($(TARGET_SIMULATOR),true)
-
 LOCAL_PATH:= $(call my-dir)
 
 include $(CLEAR_VARS)
@@ -19,6 +17,8 @@ LOCAL_C_INCLUDES:= . \
                    $(LOCAL_PATH)/sdp \
                    $(LOCAL_PATH)/smp \
                    $(LOCAL_PATH)/srvc \
+                   $(LOCAL_PATH)/../vnd/include \
+                   $(LOCAL_PATH)/../vnd/ble \
                    $(LOCAL_PATH)/../include \
                    $(LOCAL_PATH)/../gki/common \
                    $(LOCAL_PATH)/../gki/ulinux \
@@ -28,11 +28,10 @@ LOCAL_C_INCLUDES:= . \
                    $(LOCAL_PATH)/../ctrlr/include \
                    $(LOCAL_PATH)/../bta/include \
                    $(LOCAL_PATH)/../bta/sys \
-                   $(LOCAL_PATH)/../brcm/include \
                    $(LOCAL_PATH)/../utils/include \
                    $(bdroid_C_INCLUDES) \
 
-LOCAL_CFLAGS += $(bdroid_CFLAGS)
+LOCAL_CFLAGS += $(bdroid_CFLAGS) -std=c99
 
 ifeq ($(BOARD_HAVE_BLUETOOTH_BCM),true)
 LOCAL_CFLAGS += \
@@ -66,6 +65,10 @@ LOCAL_SRC_FILES:= \
     ./btm/btm_main.c \
     ./btm/btm_dev.c \
     ./btm/btm_ble_gap.c \
+    ./btm/btm_ble_adv_filter.c \
+    ./btm/btm_ble_multi_adv.c \
+    ./btm/btm_ble_batchscan.c \
+    ./btm/btm_ble_cont_energy.c \
     ./btm/btm_acl.c \
     ./btm/btm_sco.c \
     ./btm/btm_pm.c \
@@ -145,13 +148,13 @@ LOCAL_SRC_FILES:= \
     ./gap/gap_api.c \
     ./gap/gap_ble.c \
     ./gap/gap_conn.c \
-    ./gap/gap_utils.c
+    ./gap/gap_utils.c \
+    ../vnd/ble/vendor_ble.c
 
 LOCAL_MODULE := libbt-brcm_stack
 LOCAL_MODULE_TAGS := optional
 LOCAL_MODULE_CLASS := STATIC_LIBRARIES
 LOCAL_SHARED_LIBRARIES := libcutils libc
+LOCAL_MULTILIB := 32
 
 include $(BUILD_STATIC_LIBRARY)
-
-endif  # TARGET_SIMULATOR != true

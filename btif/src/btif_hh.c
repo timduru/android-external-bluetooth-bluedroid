@@ -132,12 +132,12 @@ static tHID_KB_LIST hid_kb_numlock_on_list[] =
 
 #define CHECK_BTHH_INIT() if (bt_hh_callbacks == NULL)\
     {\
-        BTIF_TRACE_WARNING1("BTHH: %s: BTHH not initialized", __FUNCTION__);\
+        BTIF_TRACE_WARNING("BTHH: %s: BTHH not initialized", __FUNCTION__);\
         return BT_STATUS_NOT_READY;\
     }\
     else\
     {\
-        BTIF_TRACE_EVENT1("BTHH: %s", __FUNCTION__);\
+        BTIF_TRACE_EVENT("BTHH: %s", __FUNCTION__);\
     }
 
 
@@ -159,6 +159,7 @@ extern BOOLEAN check_cod(const bt_bdaddr_t *remote_bdaddr, uint32_t cod);
 extern void btif_dm_cb_remove_bond(bt_bdaddr_t *bd_addr);
 extern BOOLEAN check_cod_hid(const bt_bdaddr_t *remote_bdaddr, uint32_t cod);
 extern int  scru_ascii_2_hex(char *p_ascii, int len, UINT8 *p_hex);
+extern void btif_dm_hh_open_failed(bt_bdaddr_t *bdaddr);
 
 /*****************************************************************************
 **  Local Function prototypes
@@ -202,7 +203,7 @@ static void set_keylockstate(int keymask, BOOLEAN isSet)
 
 static void toggle_os_keylockstates(int fd, int changedlockstates)
 {
-    BTIF_TRACE_EVENT3("%s: fd = %d, changedlockstates = 0x%x",
+    BTIF_TRACE_EVENT("%s: fd = %d, changedlockstates = 0x%x",
         __FUNCTION__, fd, changedlockstates);
     UINT8 hidreport[9];
     int reportIndex;
@@ -211,39 +212,62 @@ static void toggle_os_keylockstates(int fd, int changedlockstates)
     reportIndex=4;
 
     if (changedlockstates & BTIF_HH_KEYSTATE_MASK_CAPSLOCK) {
-        BTIF_TRACE_DEBUG1("%s Setting CAPSLOCK", __FUNCTION__);
+        BTIF_TRACE_DEBUG("%s Setting CAPSLOCK", __FUNCTION__);
         hidreport[reportIndex++] = (UINT8)HID_REPORT_CAPSLOCK;
     }
 
     if (changedlockstates & BTIF_HH_KEYSTATE_MASK_NUMLOCK)  {
-        BTIF_TRACE_DEBUG1("%s Setting NUMLOCK", __FUNCTION__);
+        BTIF_TRACE_DEBUG("%s Setting NUMLOCK", __FUNCTION__);
         hidreport[reportIndex++] = (UINT8)HID_REPORT_NUMLOCK;
     }
 
     if (changedlockstates & BTIF_HH_KEYSTATE_MASK_SCROLLLOCK) {
-        BTIF_TRACE_DEBUG1("%s Setting SCROLLLOCK", __FUNCTION__);
+        BTIF_TRACE_DEBUG("%s Setting SCROLLLOCK", __FUNCTION__);
         hidreport[reportIndex++] = (UINT8) HID_REPORT_SCROLLLOCK;
     }
 
-     BTIF_TRACE_DEBUG4("Writing hidreport #1 to os: "\
+     BTIF_TRACE_DEBUG("Writing hidreport #1 to os: "\
         "%s:  %x %x %x", __FUNCTION__,
          hidreport[0], hidreport[1], hidreport[2]);
-    BTIF_TRACE_DEBUG4("%s:  %x %x %x", __FUNCTION__,
+    BTIF_TRACE_DEBUG("%s:  %x %x %x", __FUNCTION__,
          hidreport[3], hidreport[4], hidreport[5]);
-    BTIF_TRACE_DEBUG4("%s:  %x %x %x", __FUNCTION__,
+    BTIF_TRACE_DEBUG("%s:  %x %x %x", __FUNCTION__,
          hidreport[6], hidreport[7], hidreport[8]);
     bta_hh_co_write(fd , hidreport, sizeof(hidreport));
     usleep(200000);
     memset(hidreport,0,9);
     hidreport[0]=1;
-    BTIF_TRACE_DEBUG4("Writing hidreport #2 to os: "\
+    BTIF_TRACE_DEBUG("Writing hidreport #2 to os: "\
        "%s:  %x %x %x", __FUNCTION__,
          hidreport[0], hidreport[1], hidreport[2]);
-    BTIF_TRACE_DEBUG4("%s:  %x %x %x", __FUNCTION__,
+    BTIF_TRACE_DEBUG("%s:  %x %x %x", __FUNCTION__,
          hidreport[3], hidreport[4], hidreport[5]);
-    BTIF_TRACE_DEBUG4("%s:  %x %x %x ", __FUNCTION__,
+    BTIF_TRACE_DEBUG("%s:  %x %x %x ", __FUNCTION__,
          hidreport[6], hidreport[7], hidreport[8]);
     bta_hh_co_write(fd , hidreport, sizeof(hidreport));
+}
+
+/*******************************************************************************
+**
+** Function         create_pbuf
+**
+** Description      Helper function to create p_buf for send_data or set_report
+**
+*******************************************************************************/
+static BT_HDR *create_pbuf(UINT16 len, UINT8 *data)
+{
+    BT_HDR* p_buf = GKI_getbuf((UINT16) (len + BTA_HH_MIN_OFFSET + sizeof(BT_HDR)));
+
+    if (p_buf) {
+        UINT8* pbuf_data;
+
+        p_buf->len = len;
+        p_buf->offset = BTA_HH_MIN_OFFSET;
+
+        pbuf_data = (UINT8*) (p_buf + 1) + p_buf->offset;
+        memcpy(pbuf_data, data, len);
+    }
+    return p_buf;
 }
 
 /*******************************************************************************
@@ -257,30 +281,20 @@ static void update_keyboard_lockstates(btif_hh_device_t *p_dev)
 {
     UINT8 len = 2;  /* reportid + 1 byte report*/
     BD_ADDR* bda;
+    BT_HDR* p_buf;
+    UINT8 data[] = {0x01, /* report id */
+                    btif_hh_keylockstates}; /* keystate */
 
     /* Set report for other keyboards */
-    BTIF_TRACE_EVENT3("%s: setting report on dev_handle %d to 0x%x",
+    BTIF_TRACE_EVENT("%s: setting report on dev_handle %d to 0x%x",
          __FUNCTION__, p_dev->dev_handle, btif_hh_keylockstates);
 
-    if (p_dev->p_buf != NULL) {
-        GKI_freebuf(p_dev->p_buf);
-    }
     /* Get SetReport buffer */
-    p_dev->p_buf = GKI_getbuf((UINT16) (len + BTA_HH_MIN_OFFSET +
-        sizeof(BT_HDR)));
-    if (p_dev->p_buf != NULL) {
-        p_dev->p_buf->len = len;
-        p_dev->p_buf->offset = BTA_HH_MIN_OFFSET;
-        p_dev->p_buf->layer_specific = BTA_HH_RPTT_OUTPUT;
-
-        /* LED status updated by data event */
-        UINT8 *pbuf_data  = (UINT8 *)(p_dev->p_buf + 1)
-            + p_dev->p_buf->offset;
-        pbuf_data[0]=0x01; /*report id */
-        pbuf_data[1]=btif_hh_keylockstates; /*keystate*/
+    p_buf = create_pbuf(len, data);
+    if (p_buf != NULL) {
+        p_buf->layer_specific = BTA_HH_RPTT_OUTPUT;
         bda = (BD_ADDR*) (&p_dev->bd_addr);
-        BTA_HhSendData(p_dev->dev_handle, *bda,
-            p_dev->p_buf);
+        BTA_HhSendData(p_dev->dev_handle, *bda, p_buf);
     }
 }
 
@@ -296,7 +310,7 @@ static void sync_lockstate_on_connect(btif_hh_device_t *p_dev)
 {
     int keylockstates;
 
-    BTIF_TRACE_EVENT1("%s: Syncing keyboard lock states after "\
+    BTIF_TRACE_EVENT("%s: Syncing keyboard lock states after "\
         "reconnect...",__FUNCTION__);
     /*If the device is connected, update keyboard state */
     update_keyboard_lockstates(p_dev);
@@ -307,7 +321,7 @@ static void sync_lockstate_on_connect(btif_hh_device_t *p_dev)
     keylockstates = get_keylockstates();
     if (keylockstates)
     {
-        BTIF_TRACE_DEBUG2("%s: Sending hid report to kernel "\
+        BTIF_TRACE_DEBUG("%s: Sending hid report to kernel "\
             "indicating lock key state 0x%x",__FUNCTION__,
             keylockstates);
         usleep(200000);
@@ -315,34 +329,11 @@ static void sync_lockstate_on_connect(btif_hh_device_t *p_dev)
     }
     else
     {
-        BTIF_TRACE_DEBUG2("%s: NOT sending hid report to kernel "\
+        BTIF_TRACE_DEBUG("%s: NOT sending hid report to kernel "\
             "indicating lock key state 0x%x",__FUNCTION__,
             keylockstates);
     }
 }
-
-/*******************************************************************************
-**
-** Function         btif_hh_find_dev_by_handle
-**
-** Description      Return the device pointer of the specified device handle
-**
-** Returns          Device entry pointer in the device table
-*******************************************************************************/
-static btif_hh_device_t *btif_hh_find_dev_by_handle(UINT8 handle)
-{
-    UINT32 i;
-    // LOGV("%s: handle = %d", __FUNCTION__, handle);
-    for (i = 0; i < BTIF_HH_MAX_HID; i++) {
-        if (btif_hh_cb.devices[i].dev_status != BTHH_CONN_STATE_UNKNOWN &&
-            btif_hh_cb.devices[i].dev_handle == handle)
-        {
-            return &btif_hh_cb.devices[i];
-        }
-    }
-    return NULL;
-}
-
 
 /*******************************************************************************
 **
@@ -422,7 +413,7 @@ void btif_hh_stop_vup_timer(bt_bdaddr_t *bd_addr)
     {
         if (p_dev->vup_timer_active)
         {
-            BTIF_TRACE_DEBUG0("stop VUP timer ");
+            BTIF_TRACE_DEBUG("stop VUP timer ");
             btu_stop_timer(&p_dev->vup_timer);
         }
         p_dev->vup_timer_active = FALSE;
@@ -442,7 +433,7 @@ void btif_hh_start_vup_timer(bt_bdaddr_t *bd_addr)
 
     if (p_dev->vup_timer_active == FALSE)
     {
-        BTIF_TRACE_DEBUG0("Start VUP timer ");
+        BTIF_TRACE_DEBUG("Start VUP timer ");
         memset(&p_dev->vup_timer, 0, sizeof(TIMER_LIST_ENT));
         p_dev->vup_timer.param = (UINT32)btif_hh_tmr_hdlr;
         btu_start_timer(&p_dev->vup_timer, BTU_TTYPE_USER_FUNC,
@@ -450,7 +441,7 @@ void btif_hh_start_vup_timer(bt_bdaddr_t *bd_addr)
     }
     else
     {
-        BTIF_TRACE_DEBUG0("Restart VUP timer ");
+        BTIF_TRACE_DEBUG("Restart VUP timer ");
         btu_stop_timer(&p_dev->vup_timer);
         btu_start_timer(&p_dev->vup_timer, BTU_TTYPE_USER_FUNC,
                         BTIF_TIMEOUT_VUP_SECS);
@@ -472,7 +463,7 @@ BOOLEAN btif_hh_add_added_dev(bt_bdaddr_t bda, tBTA_HH_ATTR_MASK attr_mask)
     int i;
     for (i = 0; i < BTIF_HH_MAX_ADDED_DEV; i++) {
         if (memcmp(&(btif_hh_cb.added_devices[i].bd_addr), &bda, BD_ADDR_LEN) == 0) {
-            BTIF_TRACE_WARNING6(" Device %02X:%02X:%02X:%02X:%02X:%02X already added",
+            BTIF_TRACE_WARNING(" Device %02X:%02X:%02X:%02X:%02X:%02X already added",
                   bda.address[0], bda.address[1], bda.address[2], bda.address[3], bda.address[4], bda.address[5]);
             return FALSE;
         }
@@ -485,7 +476,7 @@ BOOLEAN btif_hh_add_added_dev(bt_bdaddr_t bda, tBTA_HH_ATTR_MASK attr_mask)
             btif_hh_cb.added_devices[i].bd_addr.address[4] == 0 &&
             btif_hh_cb.added_devices[i].bd_addr.address[5] == 0)
         {
-            BTIF_TRACE_WARNING6(" Added device %02X:%02X:%02X:%02X:%02X:%02X",
+            BTIF_TRACE_WARNING(" Added device %02X:%02X:%02X:%02X:%02X:%02X",
                   bda.address[0], bda.address[1], bda.address[2], bda.address[3], bda.address[4], bda.address[5]);
             memcpy(&(btif_hh_cb.added_devices[i].bd_addr), &bda, BD_ADDR_LEN);
             btif_hh_cb.added_devices[i].dev_handle = BTA_HH_INVALID_HANDLE;
@@ -494,7 +485,7 @@ BOOLEAN btif_hh_add_added_dev(bt_bdaddr_t bda, tBTA_HH_ATTR_MASK attr_mask)
         }
     }
 
-    BTIF_TRACE_WARNING1("%s: Error, out of space to add device",__FUNCTION__);
+    BTIF_TRACE_WARNING("%s: Error, out of space to add device",__FUNCTION__);
     return FALSE;
 }
 
@@ -528,7 +519,7 @@ void btif_hh_remove_device(bt_bdaddr_t bd_addr)
 
     p_dev = btif_hh_find_dev_by_bda(&bd_addr);
     if (p_dev == NULL) {
-        BTIF_TRACE_WARNING6(" Oops, can't find device [%02x:%02x:%02x:%02x:%02x:%02x]",
+        BTIF_TRACE_WARNING(" Oops, can't find device [%02x:%02x:%02x:%02x:%02x:%02x]",
              bd_addr.address[0], bd_addr.address[1], bd_addr.address[2], bd_addr.address[3], bd_addr.address[4], bd_addr.address[5]);
         return;
     }
@@ -542,16 +533,12 @@ void btif_hh_remove_device(bt_bdaddr_t bd_addr)
         btif_hh_cb.device_num--;
     }
     else {
-        BTIF_TRACE_WARNING1("%s: device_num = 0", __FUNCTION__);
-    }
-    if (p_dev->p_buf != NULL) {
-        GKI_freebuf(p_dev->p_buf);
-        p_dev->p_buf = NULL;
+        BTIF_TRACE_WARNING("%s: device_num = 0", __FUNCTION__);
     }
 
     p_dev->hh_keep_polling = 0;
     p_dev->hh_poll_thread_id = -1;
-    BTIF_TRACE_DEBUG2("%s: uhid fd = %d", __FUNCTION__, p_dev->fd);
+    BTIF_TRACE_DEBUG("%s: uhid fd = %d", __FUNCTION__, p_dev->fd);
     if (p_dev->fd >= 0) {
         bta_hh_co_destroy(p_dev->fd);
         p_dev->fd = -1;
@@ -567,7 +554,7 @@ BOOLEAN btif_hh_copy_hid_info(tBTA_HH_DEV_DSCP_INFO* dest , tBTA_HH_DEV_DSCP_INF
         dest->descriptor.dsc_list = (UINT8 *) GKI_getbuf(src->descriptor.dl_len);
         if (dest->descriptor.dsc_list == NULL)
         {
-            BTIF_TRACE_WARNING1("%s: Failed to allocate DSCP for CB", __FUNCTION__);
+            BTIF_TRACE_WARNING("%s: Failed to allocate DSCP for CB", __FUNCTION__);
             return FALSE;
         }
     }
@@ -577,6 +564,8 @@ BOOLEAN btif_hh_copy_hid_info(tBTA_HH_DEV_DSCP_INFO* dest , tBTA_HH_DEV_DSCP_INF
     dest->product_id = src->product_id;
     dest->version    = src->version;
     dest->ctry_code  = src->ctry_code;
+    dest->ssr_max_latency = src->ssr_max_latency;
+    dest->ssr_min_tout = src->ssr_min_tout;
     return TRUE;
 }
 
@@ -594,7 +583,7 @@ BOOLEAN btif_hh_copy_hid_info(tBTA_HH_DEV_DSCP_INFO* dest , tBTA_HH_DEV_DSCP_INF
 
 bt_status_t btif_hh_virtual_unplug(bt_bdaddr_t *bd_addr)
 {
-    BTIF_TRACE_DEBUG1("%s", __FUNCTION__);
+    BTIF_TRACE_DEBUG("%s", __FUNCTION__);
     btif_hh_device_t *p_dev;
     char bd_str[18];
     sprintf(bd_str, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -604,7 +593,7 @@ bt_status_t btif_hh_virtual_unplug(bt_bdaddr_t *bd_addr)
     if ((p_dev != NULL) && (p_dev->dev_status == BTHH_CONN_STATE_CONNECTED)
         && (p_dev->attr_mask & HID_VIRTUAL_CABLE))
     {
-        BTIF_TRACE_DEBUG1("%s Sending BTA_HH_CTRL_VIRTUAL_CABLE_UNPLUG", __FUNCTION__);
+        BTIF_TRACE_DEBUG("%s Sending BTA_HH_CTRL_VIRTUAL_CABLE_UNPLUG", __FUNCTION__);
         /* start the timer */
         btif_hh_start_vup_timer(bd_addr);
         p_dev->local_vup = TRUE;
@@ -613,7 +602,7 @@ bt_status_t btif_hh_virtual_unplug(bt_bdaddr_t *bd_addr)
     }
     else
     {
-        BTIF_TRACE_ERROR2("%s: Error, device %s not opened.", __FUNCTION__, bd_str);
+        BTIF_TRACE_ERROR("%s: Error, device %s not opened.", __FUNCTION__, bd_str);
         return BT_STATUS_FAIL;
     }
 }
@@ -638,12 +627,12 @@ bt_status_t btif_hh_connect(bt_bdaddr_t *bd_addr)
     tBTA_HH_CONN conn;
     CHECK_BTHH_INIT();
     dev = btif_hh_find_dev_by_bda(bd_addr);
-    BTIF_TRACE_DEBUG0("Connect _hh");
+    BTIF_TRACE_DEBUG("Connect _hh");
     sprintf(bda_str, "%02X:%02X:%02X:%02X:%02X:%02X",
             (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
     if (dev == NULL && btif_hh_cb.device_num >= BTIF_HH_MAX_HID) {
         // No space for more HID device now.
-         BTIF_TRACE_WARNING2("%s: Error, exceeded the maximum supported HID device number %d",
+         BTIF_TRACE_WARNING("%s: Error, exceeded the maximum supported HID device number %d",
              __FUNCTION__, BTIF_HH_MAX_HID);
         return BT_STATUS_FAIL;
     }
@@ -651,7 +640,7 @@ bt_status_t btif_hh_connect(bt_bdaddr_t *bd_addr)
     for (i = 0; i < BTIF_HH_MAX_ADDED_DEV; i++) {
         if (memcmp(&(btif_hh_cb.added_devices[i].bd_addr), bd_addr, BD_ADDR_LEN) == 0) {
             added_dev = &btif_hh_cb.added_devices[i];
-             BTIF_TRACE_WARNING3("%s: Device %s already added, attr_mask = 0x%x",
+             BTIF_TRACE_WARNING("%s: Device %s already added, attr_mask = 0x%x",
                  __FUNCTION__, bda_str, added_dev->attr_mask);
         }
     }
@@ -659,7 +648,7 @@ bt_status_t btif_hh_connect(bt_bdaddr_t *bd_addr)
     if (added_dev != NULL) {
         if (added_dev->dev_handle == BTA_HH_INVALID_HANDLE) {
             // No space for more HID device now.
-            BTIF_TRACE_ERROR2("%s: Error, device %s added but addition failed", __FUNCTION__, bda_str);
+            BTIF_TRACE_ERROR("%s: Error, device %s added but addition failed", __FUNCTION__, bda_str);
             memset(&(added_dev->bd_addr), 0, 6);
             added_dev->dev_handle = BTA_HH_INVALID_HANDLE;
             return BT_STATUS_FAIL;
@@ -678,7 +667,7 @@ bt_status_t btif_hh_connect(bt_bdaddr_t *bd_addr)
     else
     {
         // This device shall be connected from the host side.
-        BTIF_TRACE_ERROR2("%s: Error, device %s can only be reconnected from device side",
+        BTIF_TRACE_ERROR("%s: Error, device %s can only be reconnected from device side",
              __FUNCTION__, bda_str);
         return BT_STATUS_FAIL;
     }
@@ -707,7 +696,7 @@ void btif_hh_disconnect(bt_bdaddr_t *bd_addr)
         BTA_HhClose(p_dev->dev_handle);
     }
     else
-        BTIF_TRACE_DEBUG1("%s-- Error: device not connected:",__FUNCTION__);
+        BTIF_TRACE_DEBUG("%s-- Error: device not connected:",__FUNCTION__);
 }
 
 /*******************************************************************************
@@ -719,35 +708,15 @@ void btif_hh_disconnect(bt_bdaddr_t *bd_addr)
 ** Returns          void
 **
 *******************************************************************************/
-
 void btif_hh_setreport(btif_hh_device_t *p_dev, bthh_report_type_t r_type, UINT16 size,
                             UINT8* report)
 {
-    UINT8  hexbuf[20];
-    UINT16 len = size;
-    int i = 0;
-    if (p_dev->p_buf != NULL) {
-        GKI_freebuf(p_dev->p_buf);
-    }
-    p_dev->p_buf = GKI_getbuf((UINT16) (len + BTA_HH_MIN_OFFSET + sizeof(BT_HDR)));
-    if (p_dev->p_buf == NULL) {
-        APPL_TRACE_ERROR2("%s: Error, failed to allocate RPT buffer, len = %d", __FUNCTION__, len);
+    BT_HDR* p_buf = create_pbuf(size, report);
+    if (p_buf == NULL) {
+        APPL_TRACE_ERROR("%s: Error, failed to allocate RPT buffer, size = %d", __FUNCTION__, size);
         return;
     }
-
-    p_dev->p_buf->len = len;
-    p_dev->p_buf->offset = BTA_HH_MIN_OFFSET;
-
-    //Build a SetReport data buffer
-    memset(hexbuf, 0, 20);
-    for(i=0; i<len; i++)
-        hexbuf[i] = report[i];
-
-    UINT8* pbuf_data;
-    pbuf_data = (UINT8*) (p_dev->p_buf + 1) + p_dev->p_buf->offset;
-    memcpy(pbuf_data, hexbuf, len);
-    BTA_HhSetReport(p_dev->dev_handle, r_type, p_dev->p_buf);
-
+    BTA_HhSetReport(p_dev->dev_handle, r_type, p_buf);
 }
 
 /*****************************************************************************
@@ -778,21 +747,21 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
     int i;
     int len, tmplen;
 
-    BTIF_TRACE_DEBUG2("%s: event=%s", __FUNCTION__, dump_hh_event(event));
+    BTIF_TRACE_DEBUG("%s: event=%s", __FUNCTION__, dump_hh_event(event));
 
     switch (event)
     {
         case BTA_HH_ENABLE_EVT:
-            BTIF_TRACE_DEBUG2("%s: BTA_HH_ENABLE_EVT: status =%d",__FUNCTION__, p_data->status);
+            BTIF_TRACE_DEBUG("%s: BTA_HH_ENABLE_EVT: status =%d",__FUNCTION__, p_data->status);
             if (p_data->status == BTA_HH_OK) {
                 btif_hh_cb.status = BTIF_HH_ENABLED;
-                BTIF_TRACE_DEBUG1("%s--Loading added devices",__FUNCTION__);
+                BTIF_TRACE_DEBUG("%s--Loading added devices",__FUNCTION__);
                 /* Add hid descriptors for already bonded hid devices*/
                 btif_storage_load_bonded_hid_info();
             }
             else {
                 btif_hh_cb.status = BTIF_HH_DISABLED;
-                BTIF_TRACE_WARNING1("BTA_HH_ENABLE_EVT: Error, HH enabling failed, status = %d", p_data->status);
+                BTIF_TRACE_WARNING("BTA_HH_ENABLE_EVT: Error, HH enabling failed, status = %d", p_data->status);
             }
             break;
 
@@ -807,15 +776,15 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                 }
             }
             else
-                BTIF_TRACE_WARNING1("BTA_HH_DISABLE_EVT: Error, HH disabling failed, status = %d", p_data->status);
+                BTIF_TRACE_WARNING("BTA_HH_DISABLE_EVT: Error, HH disabling failed, status = %d", p_data->status);
             break;
 
         case BTA_HH_OPEN_EVT:
-            BTIF_TRACE_WARNING3("%s: BTA_HH_OPN_EVT: handle=%d, status =%d",__FUNCTION__, p_data->conn.handle, p_data->conn.status);
+            BTIF_TRACE_WARNING("%s: BTA_HH_OPN_EVT: handle=%d, status =%d",__FUNCTION__, p_data->conn.handle, p_data->conn.status);
             if (p_data->conn.status == BTA_HH_OK) {
                 p_dev = btif_hh_find_connected_dev_by_handle(p_data->conn.handle);
                 if (p_dev == NULL) {
-                    BTIF_TRACE_WARNING1("BTA_HH_OPEN_EVT: Error, cannot find device with handle %d", p_data->conn.handle);
+                    BTIF_TRACE_WARNING("BTA_HH_OPEN_EVT: Error, cannot find device with handle %d", p_data->conn.handle);
                     btif_hh_cb.status = BTIF_HH_DEV_DISCONNECTED;
                     // The connect request must come from device side and exceeded the connected
                                    // HID device number.
@@ -823,14 +792,14 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                     HAL_CBACK(bt_hh_callbacks, connection_state_cb, (bt_bdaddr_t*) &p_data->conn.bda,BTHH_CONN_STATE_DISCONNECTED);
                 }
                 else if (p_dev->fd < 0) {
-                    BTIF_TRACE_WARNING0("BTA_HH_OPEN_EVT: Error, failed to find the uhid driver...");
+                    BTIF_TRACE_WARNING("BTA_HH_OPEN_EVT: Error, failed to find the uhid driver...");
                     memcpy(&(p_dev->bd_addr), p_data->conn.bda, BD_ADDR_LEN);
                     //remove the connection  and then try again to reconnect from the mouse side to recover
                     btif_hh_cb.status = BTIF_HH_DEV_DISCONNECTED;
                     BTA_HhClose(p_data->conn.handle);
                 }
                 else {
-                    BTIF_TRACE_WARNING1("BTA_HH_OPEN_EVT: Found device...Getting dscp info for handle ... %d",p_data->conn.handle);
+                    BTIF_TRACE_WARNING("BTA_HH_OPEN_EVT: Found device...Getting dscp info for handle ... %d",p_data->conn.handle);
                     memcpy(&(p_dev->bd_addr), p_data->conn.bda, BD_ADDR_LEN);
                     btif_hh_cb.status = BTIF_HH_DEV_CONNECTED;
                     // Send set_idle if the peer_device is a keyboard
@@ -845,22 +814,17 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
             }
             else {
                 bt_bdaddr_t *bdaddr = (bt_bdaddr_t*)p_data->conn.bda;
+                btif_dm_hh_open_failed(bdaddr);
                 HAL_CBACK(bt_hh_callbacks, connection_state_cb, (bt_bdaddr_t*) &p_data->conn.bda,BTHH_CONN_STATE_DISCONNECTED);
                 btif_hh_cb.status = BTIF_HH_DEV_DISCONNECTED;
             }
             break;
         case BTA_HH_CLOSE_EVT:
-            BTIF_TRACE_DEBUG2("BTA_HH_CLOSE_EVT: status = %d, handle = %d",
+            BTIF_TRACE_DEBUG("BTA_HH_CLOSE_EVT: status = %d, handle = %d",
             p_data->dev_status.status, p_data->dev_status.handle);
             p_dev = btif_hh_find_connected_dev_by_handle(p_data->dev_status.handle);
             if (p_dev != NULL) {
-                BTIF_TRACE_DEBUG2("%s: uhid fd = %d", __FUNCTION__, p_dev->fd);
-                if (p_dev->fd >= 0){
-                    UINT8 hidreport[9];
-                    memset(hidreport,0,9);
-                    hidreport[0]=1;
-                    bta_hh_co_write(p_dev->fd , hidreport, sizeof(hidreport));
-                }
+                BTIF_TRACE_DEBUG("%s: uhid fd = %d", __FUNCTION__, p_dev->fd);
                 if(p_dev->vup_timer_active)
                 {
                     btif_hh_stop_vup_timer(&(p_dev->bd_addr));
@@ -868,68 +832,98 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                 btif_hh_cb.status = BTIF_HH_DEV_DISCONNECTED;
                 p_dev->dev_status = BTHH_CONN_STATE_DISCONNECTED;
                 HAL_CBACK(bt_hh_callbacks, connection_state_cb,&(p_dev->bd_addr), p_dev->dev_status);
-                BTIF_TRACE_DEBUG2("%s: Closing uhid fd = %d", __FUNCTION__, p_dev->fd);
+                BTIF_TRACE_DEBUG("%s: Closing uhid fd = %d", __FUNCTION__, p_dev->fd);
                 bta_hh_co_destroy(p_dev->fd);
                 p_dev->fd = -1;
             }
             else {
-                BTIF_TRACE_WARNING1("Error: cannot find device with handle %d", p_data->dev_status.handle);
+                BTIF_TRACE_WARNING("Error: cannot find device with handle %d", p_data->dev_status.handle);
             }
             break;
-        case BTA_HH_GET_RPT_EVT:
-            BTIF_TRACE_DEBUG2("BTA_HH_GET_RPT_EVT: status = %d, handle = %d",
-                 p_data->hs_data.status, p_data->hs_data.handle);
-            p_dev = btif_hh_find_connected_dev_by_handle(p_data->conn.handle);
-            HAL_CBACK(bt_hh_callbacks, get_report_cb,(bt_bdaddr_t*) &(p_dev->bd_addr), (bthh_status_t) p_data->hs_data.status,
-                (uint8_t*) p_data->hs_data.rsp_data.p_rpt_data, BT_HDR_SIZE);
-            break;
+        case BTA_HH_GET_RPT_EVT: {
+            BT_HDR *hdr = p_data->hs_data.rsp_data.p_rpt_data;
+            UINT8 *data = NULL;
+            UINT16 len = 0;
 
+            BTIF_TRACE_DEBUG("BTA_HH_GET_RPT_EVT: status = %d, handle = %d",
+                 p_data->hs_data.status, p_data->hs_data.handle);
+            p_dev = btif_hh_find_connected_dev_by_handle(p_data->hs_data.handle);
+            if (p_dev) {
+                /* p_rpt_data is NULL in HANDSHAKE response case */
+                if (hdr) {
+                    data = (UINT8 *)(hdr + 1) + hdr->offset;
+                    len = hdr->len;
+                    HAL_CBACK(bt_hh_callbacks, get_report_cb,
+                              (bt_bdaddr_t*) &(p_dev->bd_addr),
+                              (bthh_status_t) p_data->hs_data.status, data, len);
+                } else {
+                    HAL_CBACK(bt_hh_callbacks, handshake_cb,
+                              (bt_bdaddr_t*) &(p_dev->bd_addr),
+                              (bthh_status_t) p_data->hs_data.status);
+                }
+            } else {
+                BTIF_TRACE_WARNING("Error: cannot find device with handle %d", p_data->hs_data.handle);
+            }
+            break;
+        }
         case BTA_HH_SET_RPT_EVT:
-            BTIF_TRACE_DEBUG2("BTA_HH_SET_RPT_EVT: status = %d, handle = %d",
+            BTIF_TRACE_DEBUG("BTA_HH_SET_RPT_EVT: status = %d, handle = %d",
             p_data->dev_status.status, p_data->dev_status.handle);
             p_dev = btif_hh_find_connected_dev_by_handle(p_data->dev_status.handle);
-            if (p_dev != NULL && p_dev->p_buf != NULL) {
-                BTIF_TRACE_DEBUG0("Freeing buffer..." );
-                GKI_freebuf(p_dev->p_buf);
-                p_dev->p_buf = NULL;
+            if (p_dev != NULL) {
+                HAL_CBACK(bt_hh_callbacks, handshake_cb,
+                          (bt_bdaddr_t*) &(p_dev->bd_addr),
+                          (bthh_status_t) p_data->hs_data.status);
             }
             break;
 
         case BTA_HH_GET_PROTO_EVT:
             p_dev = btif_hh_find_connected_dev_by_handle(p_data->dev_status.handle);
-            BTIF_TRACE_WARNING4("BTA_HH_GET_PROTO_EVT: status = %d, handle = %d, proto = [%d], %s",
+            BTIF_TRACE_WARNING("BTA_HH_GET_PROTO_EVT: status = %d, handle = %d, proto = [%d], %s",
                  p_data->hs_data.status, p_data->hs_data.handle,
                  p_data->hs_data.rsp_data.proto_mode,
                  (p_data->hs_data.rsp_data.proto_mode == BTA_HH_PROTO_RPT_MODE) ? "Report Mode" :
                  (p_data->hs_data.rsp_data.proto_mode == BTA_HH_PROTO_BOOT_MODE) ? "Boot Mode" : "Unsupported");
-            HAL_CBACK(bt_hh_callbacks, protocol_mode_cb,(bt_bdaddr_t*) &(p_dev->bd_addr), (bthh_status_t)p_data->hs_data.status,
-                             (bthh_protocol_mode_t) p_data->hs_data.rsp_data.proto_mode);
+            if (p_data->hs_data.rsp_data.proto_mode != BTA_HH_PROTO_UNKNOWN) {
+                HAL_CBACK(bt_hh_callbacks, protocol_mode_cb,
+                          (bt_bdaddr_t*) &(p_dev->bd_addr),
+                          (bthh_status_t)p_data->hs_data.status,
+                          (bthh_protocol_mode_t) p_data->hs_data.rsp_data.proto_mode);
+            } else {
+                HAL_CBACK(bt_hh_callbacks, handshake_cb,
+                          (bt_bdaddr_t*) &(p_dev->bd_addr),
+                          (bthh_status_t)p_data->hs_data.status);
+            }
             break;
 
         case BTA_HH_SET_PROTO_EVT:
-            BTIF_TRACE_DEBUG2("BTA_HH_SET_PROTO_EVT: status = %d, handle = %d",
+            BTIF_TRACE_DEBUG("BTA_HH_SET_PROTO_EVT: status = %d, handle = %d",
                  p_data->dev_status.status, p_data->dev_status.handle);
+            p_dev = btif_hh_find_connected_dev_by_handle(p_data->dev_status.handle);
+            if (p_dev) {
+                HAL_CBACK(bt_hh_callbacks, handshake_cb,
+                          (bt_bdaddr_t*)&(p_dev->bd_addr),
+                          (bthh_status_t)p_data->hs_data.status);
+            }
             break;
 
         case BTA_HH_GET_IDLE_EVT:
-            BTIF_TRACE_DEBUG3("BTA_HH_GET_IDLE_EVT: handle = %d, status = %d, rate = %d",
+            BTIF_TRACE_DEBUG("BTA_HH_GET_IDLE_EVT: handle = %d, status = %d, rate = %d",
                  p_data->hs_data.handle, p_data->hs_data.status,
                  p_data->hs_data.rsp_data.idle_rate);
             break;
 
         case BTA_HH_SET_IDLE_EVT:
-            BTIF_TRACE_DEBUG2("BTA_HH_SET_IDLE_EVT: status = %d, handle = %d",
+            BTIF_TRACE_DEBUG("BTA_HH_SET_IDLE_EVT: status = %d, handle = %d",
             p_data->dev_status.status, p_data->dev_status.handle);
             break;
 
         case BTA_HH_GET_DSCP_EVT:
-            BTIF_TRACE_WARNING2("BTA_HH_GET_DSCP_EVT: status = %d, handle = %d",
-                p_data->dev_status.status, p_data->dev_status.handle);
-                len = p_data->dscp_info.descriptor.dl_len;
-                BTIF_TRACE_DEBUG1("BTA_HH_GET_DSCP_EVT: len = %d", len);
+            len = p_data->dscp_info.descriptor.dl_len;
+            BTIF_TRACE_DEBUG("BTA_HH_GET_DSCP_EVT: len = %d", len);
             p_dev = btif_hh_cb.p_curr_dev;
             if (p_dev == NULL) {
-                BTIF_TRACE_ERROR0("BTA_HH_GET_DSCP_EVT: No HID device is currently connected");
+                BTIF_TRACE_ERROR("BTA_HH_GET_DSCP_EVT: No HID device is currently connected");
                 return;
             }
             if (p_dev->fd < 0) {
@@ -952,7 +946,7 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                     cached_name = "Bluetooth HID";
                 }
 
-                BTIF_TRACE_WARNING2("%s: name = %s", __FUNCTION__, cached_name);
+                BTIF_TRACE_WARNING("%s: name = %s", __FUNCTION__, cached_name);
                 bta_hh_co_send_hid_info(p_dev, cached_name,
                     p_data->dscp_info.vendor_id, p_data->dscp_info.product_id,
                     p_data->dscp_info.version,   p_data->dscp_info.ctry_code,
@@ -964,7 +958,7 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                     bt_status_t ret;
                     bdcpy(bda, p_dev->bd_addr.address);
                     btif_hh_copy_hid_info(&dscp_info, &p_data->dscp_info);
-                    BTIF_TRACE_DEBUG6("BTA_HH_GET_DSCP_EVT:bda = %02x:%02x:%02x:%02x:%02x:%02x",
+                    BTIF_TRACE_DEBUG("BTA_HH_GET_DSCP_EVT:bda = %02x:%02x:%02x:%02x:%02x:%02x",
                               p_dev->bd_addr.address[0], p_dev->bd_addr.address[1],
                               p_dev->bd_addr.address[2],p_dev->bd_addr.address[3],
                               p_dev->bd_addr.address[4], p_dev->bd_addr.address[5]);
@@ -973,10 +967,11 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                     ret = btif_storage_add_hid_device_info(&(p_dev->bd_addr), p_dev->attr_mask,p_dev->sub_class,p_dev->app_id,
                                                         p_data->dscp_info.vendor_id, p_data->dscp_info.product_id,
                                                         p_data->dscp_info.version,   p_data->dscp_info.ctry_code,
+                                                        p_data->dscp_info.ssr_max_latency, p_data->dscp_info.ssr_min_tout,
                                                         len, p_data->dscp_info.descriptor.dsc_list);
 
                     ASSERTC(ret == BT_STATUS_SUCCESS, "storing hid info failed", ret);
-                    BTIF_TRACE_WARNING0("BTA_HH_GET_DSCP_EVT: Called add device");
+                    BTIF_TRACE_WARNING("BTA_HH_GET_DSCP_EVT: Called add device");
 
                     //Free buffer created for dscp_info;
                     if (dscp_info.descriptor.dl_len >0 && dscp_info.descriptor.dsc_list != NULL)
@@ -988,7 +983,7 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                 }
                 else {
                     //Device already added.
-                    BTIF_TRACE_WARNING1("%s: Device already added ",__FUNCTION__);
+                    BTIF_TRACE_WARNING("%s: Device already added ",__FUNCTION__);
                 }
                 /*Sync HID Keyboard lockstates */
                 tmplen = sizeof(hid_kb_numlock_on_list)
@@ -1000,7 +995,7 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                         p_data->dscp_info.product_id
                         == hid_kb_numlock_on_list[i].product_id)
                     {
-                        BTIF_TRACE_DEBUG3("%s() idx[%d] Enabling "\
+                        BTIF_TRACE_DEBUG("%s() idx[%d] Enabling "\
                             "NUMLOCK for device :: %s", __FUNCTION__,
                             i, hid_kb_numlock_on_list[i].kb_name);
                         /* Enable NUMLOCK by default so that numeric
@@ -1016,7 +1011,7 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
             break;
 
         case BTA_HH_ADD_DEV_EVT:
-            BTIF_TRACE_WARNING2("BTA_HH_ADD_DEV_EVT: status = %d, handle = %d",p_data->dev_info.status, p_data->dev_info.handle);
+            BTIF_TRACE_WARNING("BTA_HH_ADD_DEV_EVT: status = %d, handle = %d",p_data->dev_info.status, p_data->dev_info.handle);
             int i;
             for (i = 0; i < BTIF_HH_MAX_ADDED_DEV; i++) {
                 if (memcmp(btif_hh_cb.added_devices[i].bd_addr.address, p_data->dev_info.bda, 6) == 0) {
@@ -1032,21 +1027,21 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
             }
             break;
         case BTA_HH_RMV_DEV_EVT:
-                BTIF_TRACE_DEBUG2("BTA_HH_RMV_DEV_EVT: status = %d, handle = %d",
+                BTIF_TRACE_DEBUG("BTA_HH_RMV_DEV_EVT: status = %d, handle = %d",
                      p_data->dev_info.status, p_data->dev_info.handle);
-                BTIF_TRACE_DEBUG6("BTA_HH_RMV_DEV_EVT:bda = %02x:%02x:%02x:%02x:%02x:%02x",
+                BTIF_TRACE_DEBUG("BTA_HH_RMV_DEV_EVT:bda = %02x:%02x:%02x:%02x:%02x:%02x",
                      p_data->dev_info.bda[0], p_data->dev_info.bda[1], p_data->dev_info.bda[2],
                      p_data->dev_info.bda[3], p_data->dev_info.bda[4], p_data->dev_info.bda[5]);
                 break;
 
 
         case BTA_HH_VC_UNPLUG_EVT:
-                BTIF_TRACE_DEBUG2("BTA_HH_VC_UNPLUG_EVT: status = %d, handle = %d",
+                BTIF_TRACE_DEBUG("BTA_HH_VC_UNPLUG_EVT: status = %d, handle = %d",
                      p_data->dev_status.status, p_data->dev_status.handle);
                 p_dev = btif_hh_find_connected_dev_by_handle(p_data->dev_status.handle);
                 btif_hh_cb.status = BTIF_HH_DEV_DISCONNECTED;
                 if (p_dev != NULL) {
-                    BTIF_TRACE_DEBUG6("BTA_HH_VC_UNPLUG_EVT:bda = %02x:%02x:%02x:%02x:%02x:%02x",
+                    BTIF_TRACE_DEBUG("BTA_HH_VC_UNPLUG_EVT:bda = %02x:%02x:%02x:%02x:%02x:%02x",
                          p_dev->bd_addr.address[0], p_dev->bd_addr.address[1],
                          p_dev->bd_addr.address[2],p_dev->bd_addr.address[3],
                          p_dev->bd_addr.address[4], p_dev->bd_addr.address[5]);
@@ -1056,9 +1051,9 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
                         btif_hh_stop_vup_timer(&(p_dev->bd_addr));
                     }
                     p_dev->dev_status = BTHH_CONN_STATE_DISCONNECTED;
-                    BTIF_TRACE_DEBUG1("%s---Sending connection state change", __FUNCTION__);
+                    BTIF_TRACE_DEBUG("%s---Sending connection state change", __FUNCTION__);
                     HAL_CBACK(bt_hh_callbacks, connection_state_cb,&(p_dev->bd_addr), p_dev->dev_status);
-                    BTIF_TRACE_DEBUG1("%s---Removing HID bond", __FUNCTION__);
+                    BTIF_TRACE_DEBUG("%s---Removing HID bond", __FUNCTION__);
                     /* If it is locally initiated VUP or remote device has its major COD as
                     Peripheral removed the bond.*/
                     if (p_dev->local_vup  || check_cod_hid(&(p_dev->bd_addr), COD_HID_MAJOR))
@@ -1080,7 +1075,7 @@ static void btif_hh_upstreams_evt(UINT16 event, char* p_param)
 
 
             default:
-                BTIF_TRACE_WARNING2("%s: Unhandled event: %d", __FUNCTION__, event);
+                BTIF_TRACE_WARNING("%s: Unhandled event: %d", __FUNCTION__, event);
                 break;
         }
 }
@@ -1138,7 +1133,7 @@ static void bte_hh_evt(tBTA_HH_EVT event, tBTA_HH *p_data)
 static void btif_hh_handle_evt(UINT16 event, char *p_param)
 {
     bt_bdaddr_t *bd_addr = (bt_bdaddr_t*)p_param;
-    BTIF_TRACE_EVENT2("%s: event=%d", __FUNCTION__, event);
+    BTIF_TRACE_EVENT("%s: event=%d", __FUNCTION__, event);
     int ret;
     switch(event)
     {
@@ -1156,7 +1151,7 @@ static void btif_hh_handle_evt(UINT16 event, char *p_param)
 
         case BTIF_HH_DISCONNECT_REQ_EVT:
         {
-            BTIF_TRACE_EVENT2("%s: event=%d", __FUNCTION__, event);
+            BTIF_TRACE_EVENT("%s: event=%d", __FUNCTION__, event);
             btif_hh_disconnect(bd_addr);
             HAL_CBACK(bt_hh_callbacks, connection_state_cb,bd_addr,BTHH_CONN_STATE_DISCONNECTING);
         }
@@ -1164,14 +1159,14 @@ static void btif_hh_handle_evt(UINT16 event, char *p_param)
 
         case BTIF_HH_VUP_REQ_EVT:
         {
-            BTIF_TRACE_EVENT2("%s: event=%d", __FUNCTION__, event);
+            BTIF_TRACE_EVENT("%s: event=%d", __FUNCTION__, event);
             ret = btif_hh_virtual_unplug(bd_addr);
         }
         break;
 
         default:
         {
-            BTIF_TRACE_WARNING2("%s : Unknown event 0x%x", __FUNCTION__, event);
+            BTIF_TRACE_WARNING("%s : Unknown event 0x%x", __FUNCTION__, event);
         }
         break;
     }
@@ -1194,7 +1189,7 @@ void btif_hh_tmr_hdlr(TIMER_LIST_ENT *tle)
     int param_len = 0;
     memset(&p_data, 0, sizeof(tBTA_HH));
 
-    BTIF_TRACE_DEBUG2("%s timer_in_use=%d",  __FUNCTION__, tle->in_use );
+    BTIF_TRACE_DEBUG("%s timer_in_use=%d",  __FUNCTION__, tle->in_use );
 
     for (i = 0; i < BTIF_HH_MAX_HID; i++) {
         if (btif_hh_cb.devices[i].dev_status == BTHH_CONN_STATE_CONNECTED)
@@ -1230,7 +1225,7 @@ void btif_hh_tmr_hdlr(TIMER_LIST_ENT *tle)
 static bt_status_t init( bthh_callbacks_t* callbacks )
 {
     UINT32 i;
-    BTIF_TRACE_EVENT1("%s", __FUNCTION__);
+    BTIF_TRACE_EVENT("%s", __FUNCTION__);
 
     bt_hh_callbacks = callbacks;
     memset(&btif_hh_cb, 0, sizeof(btif_hh_cb));
@@ -1279,7 +1274,7 @@ static bt_status_t disconnect( bt_bdaddr_t *bd_addr )
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED)
     {
-        BTIF_TRACE_WARNING2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_WARNING("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
     p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
@@ -1290,7 +1285,7 @@ static bt_status_t disconnect( bt_bdaddr_t *bd_addr )
     }
     else
     {
-        BTIF_TRACE_WARNING1("%s: Error, device  not opened.", __FUNCTION__);
+        BTIF_TRACE_WARNING("%s: Error, device  not opened.", __FUNCTION__);
         return BT_STATUS_FAIL;
     }
 }
@@ -1314,13 +1309,13 @@ static bt_status_t virtual_unplug (bt_bdaddr_t *bd_addr)
             bd_addr->address[4], bd_addr->address[5]);
     if (btif_hh_cb.status == BTIF_HH_DISABLED)
     {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
     p_dev = btif_hh_find_dev_by_bda(bd_addr);
     if (!p_dev)
     {
-        BTIF_TRACE_ERROR2("%s: Error, device %s not opened.", __FUNCTION__, bd_str);
+        BTIF_TRACE_ERROR("%s: Error, device %s not opened.", __FUNCTION__, bd_str);
         return BT_STATUS_FAIL;
     }
     btif_transfer_context(btif_hh_handle_evt, BTIF_HH_VUP_REQ_EVT,
@@ -1344,9 +1339,9 @@ static bt_status_t set_info (bt_bdaddr_t *bd_addr, bthh_hid_info_t hid_info )
     tBTA_HH_DEV_DSCP_INFO dscp_info;
     BD_ADDR* bda = (BD_ADDR*) bd_addr;
 
-    BTIF_TRACE_DEBUG6("addr = %02X:%02X:%02X:%02X:%02X:%02X",
+    BTIF_TRACE_DEBUG("addr = %02X:%02X:%02X:%02X:%02X:%02X",
          (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
-    BTIF_TRACE_DEBUG6("%s: sub_class = 0x%02x, app_id = %d, vendor_id = 0x%04x, "
+    BTIF_TRACE_DEBUG("%s: sub_class = 0x%02x, app_id = %d, vendor_id = 0x%04x, "
          "product_id = 0x%04x, version= 0x%04x",
          __FUNCTION__, hid_info.sub_class,
          hid_info.app_id, hid_info.vendor_id, hid_info.product_id,
@@ -1354,7 +1349,7 @@ static bt_status_t set_info (bt_bdaddr_t *bd_addr, bthh_hid_info_t hid_info )
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED)
     {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
 
@@ -1382,73 +1377,6 @@ static bt_status_t set_info (bt_bdaddr_t *bd_addr, bthh_hid_info_t hid_info )
 
     return BT_STATUS_SUCCESS;
 }
-/*******************************************************************************
-**
-** Function         get_idle_time
-**
-** Description      Get the HID idle time
-**
-** Returns         bt_status_t
-**
-*******************************************************************************/
-static bt_status_t get_idle_time(bt_bdaddr_t *bd_addr)
-{
-    CHECK_BTHH_INIT();
-    btif_hh_device_t *p_dev;
-    BD_ADDR* bda = (BD_ADDR*) bd_addr;
-
-    BTIF_TRACE_DEBUG6(" addr = %02X:%02X:%02X:%02X:%02X:%02X",
-         (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
-
-    if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
-        return BT_STATUS_FAIL;
-    }
-
-    p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
-    if (p_dev != NULL) {
-        //BTA_HhGetIdle(p_dev->dev_handle);
-    }
-    else {
-        return BT_STATUS_FAIL;
-    }
-    return BT_STATUS_SUCCESS;
-}
-
-/*******************************************************************************
-**
-** Function         set_idle_time
-**
-** Description      Set the HID idle time
-**
-** Returns         bt_status_t
-**
-*******************************************************************************/
-static bt_status_t set_idle_time (bt_bdaddr_t *bd_addr, uint8_t idle_time)
-{
-    CHECK_BTHH_INIT();
-    btif_hh_device_t *p_dev;
-    BD_ADDR* bda = (BD_ADDR*) bd_addr;
-
-    BTIF_TRACE_DEBUG6("addr = %02X:%02X:%02X:%02X:%02X:%02X",
-         (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
-
-    if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
-        return BT_STATUS_FAIL;
-    }
-
-    p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
-    if (p_dev == NULL) {
-        BTIF_TRACE_WARNING6(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
-             (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
-        return BT_STATUS_FAIL;
-    }
-    else {
-        //BTA_HhSetIdle(p_dev->dev_handle, idle_time);
-    }
-    return BT_STATUS_SUCCESS;
-}
 
 /*******************************************************************************
 **
@@ -1464,17 +1392,19 @@ static bt_status_t get_protocol (bt_bdaddr_t *bd_addr, bthh_protocol_mode_t prot
     CHECK_BTHH_INIT();
     btif_hh_device_t *p_dev;
     BD_ADDR* bda = (BD_ADDR*) bd_addr;
+    UNUSED(protocolMode);
 
-    BTIF_TRACE_DEBUG6(" addr = %02X:%02X:%02X:%02X:%02X:%02X",
+    BTIF_TRACE_DEBUG(" addr = %02X:%02X:%02X:%02X:%02X:%02X",
          (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
 
     p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
     if (p_dev != NULL) {
+
         BTA_HhGetProtoMode(p_dev->dev_handle);
     }
     else {
@@ -1499,24 +1429,24 @@ static bt_status_t set_protocol (bt_bdaddr_t *bd_addr, bthh_protocol_mode_t prot
     UINT8 proto_mode = protocolMode;
     BD_ADDR* bda = (BD_ADDR*) bd_addr;
 
-    BTIF_TRACE_DEBUG2("%s:proto_mode = %d", __FUNCTION__,protocolMode);
+    BTIF_TRACE_DEBUG("%s:proto_mode = %d", __FUNCTION__,protocolMode);
 
-    BTIF_TRACE_DEBUG6("addr = %02X:%02X:%02X:%02X:%02X:%02X",
+    BTIF_TRACE_DEBUG("addr = %02X:%02X:%02X:%02X:%02X:%02X",
          (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
 
     p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
     if (p_dev == NULL) {
-        BTIF_TRACE_WARNING6(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
+        BTIF_TRACE_WARNING(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
              (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
         return BT_STATUS_FAIL;
     }
     else if (protocolMode != BTA_HH_PROTO_RPT_MODE && protocolMode != BTA_HH_PROTO_BOOT_MODE) {
-        BTIF_TRACE_WARNING2("s: Error, device proto_mode = %d.", __FUNCTION__, proto_mode);
+        BTIF_TRACE_WARNING("s: Error, device proto_mode = %d.", __FUNCTION__, proto_mode);
         return BT_STATUS_FAIL;
     }
     else {
@@ -1542,26 +1472,26 @@ static bt_status_t get_report (bt_bdaddr_t *bd_addr, bthh_report_type_t reportTy
     btif_hh_device_t *p_dev;
     BD_ADDR* bda = (BD_ADDR*) bd_addr;
 
-    BTIF_TRACE_DEBUG4("%s:proto_mode = %dr_type = %d, rpt_id = %d, buf_size = %d", __FUNCTION__,
+    BTIF_TRACE_DEBUG("%s:proto_mode = %dr_type = %d, rpt_id = %d, buf_size = %d", __FUNCTION__,
           reportType, reportId, bufferSize);
 
-    BTIF_TRACE_DEBUG6("addr = %02X:%02X:%02X:%02X:%02X:%02X",
+    BTIF_TRACE_DEBUG("addr = %02X:%02X:%02X:%02X:%02X:%02X",
          (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
 
 
     p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
     if (p_dev == NULL) {
-        BTIF_TRACE_ERROR6("%s: Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
+        BTIF_TRACE_ERROR("%s: Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
              (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
         return BT_STATUS_FAIL;
     }
     else if ( ((int) reportType) <= BTA_HH_RPTT_RESRV || ((int) reportType) > BTA_HH_RPTT_FEATURE) {
-        BTIF_TRACE_ERROR6(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
+        BTIF_TRACE_ERROR(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
              (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
         return BT_STATUS_FAIL;
     }
@@ -1588,61 +1518,60 @@ static bt_status_t set_report (bt_bdaddr_t *bd_addr, bthh_report_type_t reportTy
     btif_hh_device_t *p_dev;
     BD_ADDR* bda = (BD_ADDR*) bd_addr;
 
-    BTIF_TRACE_DEBUG2("%s:reportType = %d", __FUNCTION__,reportType);
+    BTIF_TRACE_DEBUG("%s:reportType = %d", __FUNCTION__,reportType);
 
-    BTIF_TRACE_DEBUG6("addr = %02X:%02X:%02X:%02X:%02X:%02X",
+    BTIF_TRACE_DEBUG("addr = %02X:%02X:%02X:%02X:%02X:%02X",
          (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
 
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
 
     p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
     if (p_dev == NULL) {
-        BTIF_TRACE_ERROR6("%s: Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
+        BTIF_TRACE_ERROR("%s: Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
              (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
         return BT_STATUS_FAIL;
     }
     else if ( ( (int) reportType) <= BTA_HH_RPTT_RESRV || ( (int) reportType) > BTA_HH_RPTT_FEATURE) {
-        BTIF_TRACE_ERROR6(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
+        BTIF_TRACE_ERROR(" Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
              (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
         return BT_STATUS_FAIL;
     }
     else {
         int    hex_bytes_filled;
-        UINT8  hexbuf[200];
+        UINT8  *hexbuf;
         UINT16 len = (strlen(report) + 1) / 2;
 
-        if (p_dev->p_buf != NULL) {
-            GKI_freebuf(p_dev->p_buf);
-        }
-        p_dev->p_buf = GKI_getbuf((UINT16) (len + BTA_HH_MIN_OFFSET + sizeof(BT_HDR)));
-        if (p_dev->p_buf == NULL) {
-            BTIF_TRACE_ERROR2("%s: Error, failed to allocate RPT buffer, len = %d", __FUNCTION__, len);
+        hexbuf = GKI_getbuf(len);
+        if (hexbuf == NULL) {
+            BTIF_TRACE_ERROR("%s: Error, failed to allocate RPT buffer, len = %d",
+                __FUNCTION__, len);
             return BT_STATUS_FAIL;
         }
 
-        p_dev->p_buf->len = len;
-        p_dev->p_buf->offset = BTA_HH_MIN_OFFSET;
-
         /* Build a SetReport data buffer */
-        memset(hexbuf, 0, 200);
+        memset(hexbuf, 0, len);
         //TODO
         hex_bytes_filled = ascii_2_hex(report, len, hexbuf);
-        ALOGI("Hex bytes filled, hex value: %d", hex_bytes_filled);
-
+        BTIF_TRACE_DEBUG("Hex bytes filled, hex value: %d", hex_bytes_filled);
         if (hex_bytes_filled) {
-            UINT8* pbuf_data;
-            pbuf_data = (UINT8*) (p_dev->p_buf + 1) + p_dev->p_buf->offset;
-            memcpy(pbuf_data, hexbuf, hex_bytes_filled);
-            BTA_HhSetReport(p_dev->dev_handle, reportType, p_dev->p_buf);
+            BT_HDR* p_buf = create_pbuf(hex_bytes_filled, hexbuf);
+            if (p_buf == NULL) {
+                BTIF_TRACE_ERROR("%s: Error, failed to allocate RPT buffer, len = %d",
+                                  __FUNCTION__, hex_bytes_filled);
+                GKI_freebuf(hexbuf);
+                return BT_STATUS_FAIL;
+            }
+            BTA_HhSetReport(p_dev->dev_handle, reportType, p_buf);
+            GKI_freebuf(hexbuf);
+            return BT_STATUS_SUCCESS;
         }
-        return BT_STATUS_SUCCESS;
+        GKI_freebuf(hexbuf);
+        return BT_STATUS_FAIL;
     }
-
-
 }
 
 /*******************************************************************************
@@ -1660,56 +1589,56 @@ static bt_status_t send_data (bt_bdaddr_t *bd_addr, char* data)
     btif_hh_device_t *p_dev;
     BD_ADDR* bda = (BD_ADDR*) bd_addr;
 
-    BTIF_TRACE_DEBUG1("%s", __FUNCTION__);
+    BTIF_TRACE_DEBUG("%s", __FUNCTION__);
 
-    BTIF_TRACE_DEBUG6("addr = %02X:%02X:%02X:%02X:%02X:%02X",
+    BTIF_TRACE_DEBUG("addr = %02X:%02X:%02X:%02X:%02X:%02X",
          (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
 
     if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_ERROR2("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_ERROR("%s: Error, HH status = %d", __FUNCTION__, btif_hh_cb.status);
         return BT_STATUS_FAIL;
     }
 
     p_dev = btif_hh_find_connected_dev_by_bda(bd_addr);
     if (p_dev == NULL) {
-        BTIF_TRACE_ERROR6("%s: Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
+        BTIF_TRACE_ERROR("%s: Error, device %02X:%02X:%02X:%02X:%02X:%02X not opened.",
              (*bda)[0], (*bda)[1], (*bda)[2], (*bda)[3], (*bda)[4], (*bda)[5]);
         return BT_STATUS_FAIL;
     }
 
     else {
         int    hex_bytes_filled;
-        UINT8  hexbuf[200];
+        UINT8  *hexbuf;
         UINT16 len = (strlen(data) + 1) / 2;
 
-        if (p_dev->p_buf != NULL) {
-            GKI_freebuf(p_dev->p_buf);
-        }
-        p_dev->p_buf = GKI_getbuf((UINT16) (len + BTA_HH_MIN_OFFSET + sizeof(BT_HDR)));
-        if (p_dev->p_buf == NULL) {
-            BTIF_TRACE_ERROR2("%s: Error, failed to allocate RPT buffer, len = %d", __FUNCTION__, len);
+        hexbuf = GKI_getbuf(len);
+        if (hexbuf == NULL) {
+            BTIF_TRACE_ERROR("%s: Error, failed to allocate RPT buffer, len = %d",
+                __FUNCTION__, len);
             return BT_STATUS_FAIL;
         }
 
-        p_dev->p_buf->len = len;
-        p_dev->p_buf->offset = BTA_HH_MIN_OFFSET;
-
-        /* Build a SetReport data buffer */
-        memset(hexbuf, 0, 200);
+        /* Build a SendData data buffer */
+        memset(hexbuf, 0, len);
         hex_bytes_filled = ascii_2_hex(data, len, hexbuf);
-        BTIF_TRACE_ERROR2("Hex bytes filled, hex value: %d, %d", hex_bytes_filled, len);
+        BTIF_TRACE_ERROR("Hex bytes filled, hex value: %d, %d", hex_bytes_filled, len);
 
         if (hex_bytes_filled) {
-            UINT8* pbuf_data;
-            pbuf_data = (UINT8*) (p_dev->p_buf + 1) + p_dev->p_buf->offset;
-            memcpy(pbuf_data, hexbuf, hex_bytes_filled);
-            p_dev->p_buf->layer_specific = BTA_HH_RPTT_OUTPUT;
-            BTA_HhSendData(p_dev->dev_handle, *bda, p_dev->p_buf);
+            BT_HDR* p_buf = create_pbuf(hex_bytes_filled, hexbuf);
+            if (p_buf == NULL) {
+                BTIF_TRACE_ERROR("%s: Error, failed to allocate RPT buffer, len = %d",
+                                  __FUNCTION__, hex_bytes_filled);
+                GKI_freebuf(hexbuf);
+                return BT_STATUS_FAIL;
+            }
+            p_buf->layer_specific = BTA_HH_RPTT_OUTPUT;
+            BTA_HhSendData(p_dev->dev_handle, *bda, p_buf);
+            GKI_freebuf(hexbuf);
             return BT_STATUS_SUCCESS;
         }
-
+        GKI_freebuf(hexbuf);
+        return BT_STATUS_FAIL;
     }
-    return BT_STATUS_FAIL;
 }
 
 
@@ -1724,18 +1653,18 @@ static bt_status_t send_data (bt_bdaddr_t *bd_addr, char* data)
 *******************************************************************************/
 static void  cleanup( void )
 {
-    BTIF_TRACE_EVENT1("%s", __FUNCTION__);
+    BTIF_TRACE_EVENT("%s", __FUNCTION__);
     btif_hh_device_t *p_dev;
     int i;
     if (btif_hh_cb.status == BTIF_HH_DISABLED) {
-        BTIF_TRACE_WARNING2("%s: HH disabling or disabled already, status = %d", __FUNCTION__, btif_hh_cb.status);
+        BTIF_TRACE_WARNING("%s: HH disabling or disabled already, status = %d", __FUNCTION__, btif_hh_cb.status);
         return;
     }
     btif_hh_cb.status = BTIF_HH_DISABLING;
     for (i = 0; i < BTIF_HH_MAX_HID; i++) {
          p_dev = &btif_hh_cb.devices[i];
          if (p_dev->dev_status != BTHH_CONN_STATE_UNKNOWN && p_dev->fd >= 0) {
-             BTIF_TRACE_DEBUG2("%s: Closing uhid fd = %d", __FUNCTION__, p_dev->fd);
+             BTIF_TRACE_DEBUG("%s: Closing uhid fd = %d", __FUNCTION__, p_dev->fd);
              bta_hh_co_destroy(p_dev->fd);
              p_dev->fd = -1;
              p_dev->hh_keep_polling = 0;
@@ -1782,7 +1711,7 @@ bt_status_t btif_hh_execute_service(BOOLEAN b_enable)
      if (b_enable)
      {
           /* Enable and register with BTA-HH */
-          BTA_HhEnable(BTA_SEC_NONE, bte_hh_evt);
+          BTA_HhEnable(BTA_SEC_ENCRYPT, bte_hh_evt);
      }
      else {
          /* Disable HH */
@@ -1802,6 +1731,6 @@ bt_status_t btif_hh_execute_service(BOOLEAN b_enable)
 *******************************************************************************/
 const bthh_interface_t *btif_hh_get_interface()
 {
-    BTIF_TRACE_EVENT1("%s", __FUNCTION__);
+    BTIF_TRACE_EVENT("%s", __FUNCTION__);
     return &bthhInterface;
 }

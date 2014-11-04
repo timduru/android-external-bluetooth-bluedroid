@@ -26,6 +26,7 @@
 #include <string.h>
 #include "data_types.h"
 #include "bt_target.h"
+#include "bt_utils.h"
 #include "avdt_api.h"
 #include "avdtc_api.h"
 #include "avdt_int.h"
@@ -103,6 +104,8 @@ void avdt_scb_hdl_abort_cmd(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_hdl_abort_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+    UNUSED(p_data);
     return;
 }
 
@@ -167,6 +170,8 @@ void avdt_scb_hdl_getconfig_cmd(tAVDT_SCB *p_scb,tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_hdl_getconfig_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+    UNUSED(p_data);
     return;
 }
 
@@ -215,6 +220,8 @@ void avdt_scb_hdl_open_rej(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_hdl_open_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_data);
+
     /* initiate opening of trans channels for this SEID */
     p_scb->role = AVDT_OPEN_INT;
     avdt_ad_open_req(AVDT_CHAN_MEDIA, p_scb->p_ccb, p_scb, AVDT_INT);
@@ -278,7 +285,7 @@ void avdt_scb_hdl_pkt_no_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
     /* do sanity check */
     if ((offset > p_data->p_pkt->len) || ((pad_len + offset) > p_data->p_pkt->len))
     {
-        AVDT_TRACE_WARNING0("Got bad media packet");
+        AVDT_TRACE_WARNING("Got bad media packet");
         GKI_freebuf(p_data->p_pkt);
     }
     /* adjust offset and length and send it up */
@@ -333,7 +340,7 @@ UINT8 * avdt_scb_hdl_report(tAVDT_SCB *p_scb, UINT8 *p, UINT16 len)
     AVDT_REPORT_TYPE    pt;
     tAVDT_REPORT_DATA   report, *p_rpt;
 
-    AVDT_TRACE_DEBUG0( "avdt_scb_hdl_report");
+    AVDT_TRACE_DEBUG( "avdt_scb_hdl_report");
     if(p_scb->cs.p_report_cback)
     {
         p_rpt = &report;
@@ -370,14 +377,14 @@ UINT8 * avdt_scb_hdl_report(tAVDT_SCB *p_scb, UINT8 *p, UINT16 len)
             }
             else
             {
-                AVDT_TRACE_WARNING5( " - SDES SSRC=0x%08x sc=%d %d len=%d %s",
+                AVDT_TRACE_WARNING( " - SDES SSRC=0x%08x sc=%d %d len=%d %s",
                     ssrc, o_cc, *p, *(p+1), p+2);
                 result = AVDT_BUSY;
             }
             break;
 
         default:
-            AVDT_TRACE_ERROR1( "Bad Report pkt - packet type: %d", pt);
+            AVDT_TRACE_ERROR( "Bad Report pkt - packet type: %d", pt);
             result = AVDT_BAD_PARAMS;
         }
 
@@ -428,7 +435,7 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
     {
         if (p_end - p < 4) /* length check. maximum length of AL header = 4 */
         {
-            AVDT_TRACE_WARNING2("p_end: 0x%x - p:0x%x < 4", p_end, p);
+            AVDT_TRACE_WARNING("p_end: 0x%x - p:0x%x < 4", p_end, p);
             break;
         }
 
@@ -478,14 +485,14 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             else
 #endif
             {
-                AVDT_TRACE_WARNING2("bad tsid: %d, mux_tsid_media:%d", al_tsid, p_scb->curr_cfg.mux_tsid_media);
+                AVDT_TRACE_WARNING("bad tsid: %d, mux_tsid_media:%d", al_tsid, p_scb->curr_cfg.mux_tsid_media);
                 break;
             }
         }
         /* check are buffer for assembling and related callback set */
         else if ((p_scb->p_media_buf == NULL) || (p_scb->cs.p_media_cback == NULL))
         {
-            AVDT_TRACE_WARNING0("NULL p_media_buf or p_media_cback");
+            AVDT_TRACE_WARNING("NULL p_media_buf or p_media_cback");
             break;
         }
 
@@ -493,7 +500,7 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
         /* it is media fragment beginning */
         if(!al_frag) /* is it first fragment of original media packet */
         {
-            AVDT_TRACE_DEBUG2("al:%d media:%d",
+            AVDT_TRACE_DEBUG("al:%d media:%d",
                 al_len, p_scb->media_buf_len);
 
             p_scb->frag_off = 0;
@@ -501,31 +508,31 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             /* length check: minimum length of media header is 12 */
             if (p_scb->frag_org_len < 12)
             {
-                AVDT_TRACE_WARNING1("bad al_len: %d(<12)", al_len);
+                AVDT_TRACE_WARNING("bad al_len: %d(<12)", al_len);
                 break;
             }
             /* check that data fit into buffer */
             if (al_len > p_scb->media_buf_len)
             {
-                AVDT_TRACE_WARNING2("bad al_len: %d(>%d)", al_len, p_scb->media_buf_len);
+                AVDT_TRACE_WARNING("bad al_len: %d(>%d)", al_len, p_scb->media_buf_len);
                 break;
             }
             /* make sure it is the last fragment in l2cap packet */
             if (p + al_len < p_end)
             {
-                AVDT_TRACE_WARNING2("bad al_len: %d(>%d)", al_len, p_scb->media_buf_len);
+                AVDT_TRACE_WARNING("bad al_len: %d(>%d)", al_len, p_scb->media_buf_len);
                 break;
             }
         }
         else
         {
-            AVDT_TRACE_DEBUG4("al:%d media:%d frag_org_len:%d frag_off:%d",
+            AVDT_TRACE_DEBUG("al:%d media:%d frag_org_len:%d frag_off:%d",
                 al_len, p_scb->media_buf_len, p_scb->frag_org_len, p_scb->frag_off);
 
             /* check that remaining length from AL header equals to original len - length of already received fragments */
             if(al_len != p_scb->frag_org_len - p_scb->frag_off)
             {
-                AVDT_TRACE_WARNING4("al_len:%d != (frag_org_len:%d - frag_off:%d) %d",
+                AVDT_TRACE_WARNING("al_len:%d != (frag_org_len:%d - frag_off:%d) %d",
                     al_len, p_scb->frag_org_len, p_scb->frag_off,
                     (p_scb->frag_org_len- p_scb->frag_off));
                 break;
@@ -534,19 +541,19 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             /* do sanity check */
             if (p_scb->frag_off == 0)
             {
-                AVDT_TRACE_WARNING0("frag_off=0");
+                AVDT_TRACE_WARNING("frag_off=0");
                 break;
             }
         }
         /* do common sanity check */
         if((p_scb->frag_org_len <= p_scb->frag_off) || (p_scb->frag_org_len >= p_scb->media_buf_len))
         {
-            AVDT_TRACE_WARNING3("common sanity frag_off:%d frag_org_len:%d media_buf_len:%d",
+            AVDT_TRACE_WARNING("common sanity frag_off:%d frag_org_len:%d media_buf_len:%d",
                 p_scb->frag_off, p_scb->frag_org_len, p_scb->media_buf_len);
             break;
         }
 
-        AVDT_TRACE_DEBUG4("Received fragment org_len=%d off=%d al_len=%d frag_len=%d",
+        AVDT_TRACE_DEBUG("Received fragment org_len=%d off=%d al_len=%d frag_len=%d",
             p_scb->frag_org_len, p_scb->frag_off, al_len, frag_len);
 
         /* copy fragment into buffer */
@@ -574,7 +581,7 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             {
                 if(p_scb->p_media_buf + p_scb->frag_off - p_payload < 4)
                 {
-                    AVDT_TRACE_WARNING3("length check frag_off:%d p_media_buf:%d p_payload:%d",
+                    AVDT_TRACE_WARNING("length check frag_off:%d p_media_buf:%d p_payload:%d",
                         p_scb->frag_off, p_scb->p_media_buf, p_payload);
                     break;/* length check */
                 }
@@ -585,7 +592,7 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 
             if(p_payload >= p_scb->p_media_buf + p_scb->frag_off)
             {
-                AVDT_TRACE_WARNING3("length check2 frag_off:%d p_media_buf:%d p_payload:%d",
+                AVDT_TRACE_WARNING("length check2 frag_off:%d p_media_buf:%d p_payload:%d",
                     p_scb->frag_off, p_scb->p_media_buf, p_payload);
                 break;/* length check */
             }
@@ -601,7 +608,7 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             /* payload length */
             payload_len = (UINT32)(p_scb->p_media_buf + p_scb->frag_off - pad_len - p_payload);
 
-            AVDT_TRACE_DEBUG2("Received last fragment header=%d len=%d",
+            AVDT_TRACE_DEBUG("Received last fragment header=%d len=%d",
                 p_payload - p_scb->p_media_buf,payload_len);
 
             /* send total media packet up */
@@ -615,7 +622,7 @@ void avdt_scb_hdl_pkt_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 
     if(p < p_end)
     {
-        AVDT_TRACE_WARNING0("*** Got bad media packet");
+        AVDT_TRACE_WARNING("*** Got bad media packet");
     }
     GKI_freebuf(p_data->p_pkt);
 }
@@ -668,8 +675,10 @@ void avdt_scb_hdl_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_drop_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+
     GKI_freebuf(p_data->p_pkt);
-    AVDT_TRACE_WARNING0("Dropped incoming media packet");
+    AVDT_TRACE_ERROR(" avdt_scb_drop_pkt Dropped incoming media packet");
 }
 
 /*******************************************************************************
@@ -817,7 +826,7 @@ void avdt_scb_hdl_setconfig_cmd(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             p_scb->peer_seid = p_data->msg.config_cmd.int_seid;
             memcpy(&p_scb->req_cfg, p_cfg, sizeof(tAVDT_CFG));
             /* call app callback */
-            (*p_scb->cs.p_ctrl_cback)(avdt_scb_to_hdl(p_scb),
+            (*p_scb->cs.p_ctrl_cback)(avdt_scb_to_hdl(p_scb), /* handle of scb- which is same as sep handle of bta_av_cb.p_scb*/
                                       p_scb->p_ccb ? p_scb->p_ccb->peer_addr : NULL,
                                       AVDT_CONFIG_IND_EVT,
                                       (tAVDT_CTRL *) &p_data->msg.config_cmd);
@@ -874,6 +883,7 @@ void avdt_scb_hdl_setconfig_rej(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 void avdt_scb_hdl_setconfig_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
     tAVDT_EVT_HDR   single;
+    UNUSED(p_data);
 
     if (p_scb->p_ccb != NULL)
     {
@@ -898,6 +908,8 @@ void avdt_scb_hdl_setconfig_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_hdl_start_cmd(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_data);
+
     (*p_scb->cs.p_ctrl_cback)(avdt_scb_to_hdl(p_scb),
                               p_scb->p_ccb ? p_scb->p_ccb->peer_addr : NULL,
                               AVDT_START_IND_EVT,
@@ -934,6 +946,8 @@ void avdt_scb_hdl_start_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_hdl_suspend_cmd(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_data);
+
     (*p_scb->cs.p_ctrl_cback)(avdt_scb_to_hdl(p_scb),
                               p_scb->p_ccb ? p_scb->p_ccb->peer_addr : NULL,
                               AVDT_SUSPEND_IND_EVT,
@@ -1139,7 +1153,7 @@ void avdt_scb_hdl_tc_open(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
     event = (p_scb->role == AVDT_OPEN_INT) ? AVDT_OPEN_CFM_EVT : AVDT_OPEN_IND_EVT;
     p_data->open.hdr.err_code = 0;
 
-    AVDT_TRACE_DEBUG3("psc_mask: cfg: 0x%x, req:0x%x, cur: 0x%x",
+    AVDT_TRACE_DEBUG("psc_mask: cfg: 0x%x, req:0x%x, cur: 0x%x",
         p_scb->cs.cfg.psc_mask, p_scb->req_cfg.psc_mask, p_scb->curr_cfg.psc_mask);
 #if AVDT_REPORTING == TRUE
     if(p_scb->curr_cfg.psc_mask & AVDT_PSC_REPORT)
@@ -1209,7 +1223,7 @@ void avdt_scb_hdl_write_req_no_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
         GKI_freebuf(p_scb->p_pkt);
 
         /* this shouldn't be happening */
-        AVDT_TRACE_WARNING0("Dropped media packet; congested");
+        AVDT_TRACE_WARNING("Dropped media packet; congested");
     }
 
     /* build a media packet */
@@ -1220,7 +1234,7 @@ void avdt_scb_hdl_write_req_no_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 
         p_data->apiwrite.p_buf->len += AVDT_MEDIA_HDR_SIZE;
         p_data->apiwrite.p_buf->offset -= AVDT_MEDIA_HDR_SIZE;
-
+        p_scb->media_seq++;
         p = (UINT8 *)(p_data->apiwrite.p_buf + 1) + p_data->apiwrite.p_buf->offset;
 
         UINT8_TO_BE_STREAM(p, AVDT_MEDIA_OCTET1);
@@ -1229,8 +1243,6 @@ void avdt_scb_hdl_write_req_no_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
         UINT32_TO_BE_STREAM(p, p_data->apiwrite.time_stamp);
         UINT32_TO_BE_STREAM(p, ssrc);
     }
-
-    p_scb->media_seq++;
 
     /* store it */
     p_scb->p_pkt = p_data->apiwrite.p_buf;
@@ -1260,7 +1272,7 @@ void avdt_scb_hdl_write_req_frag(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
             GKI_freebuf(p_frag);
 
         /* this shouldn't be happening */
-        AVDT_TRACE_WARNING0("*** Dropped media packet; congested");
+        AVDT_TRACE_WARNING("*** Dropped media packet; congested");
     }
 
     /* build a media fragments */
@@ -1344,6 +1356,7 @@ void avdt_scb_hdl_write_req(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 void avdt_scb_snd_abort_req(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
     tAVDT_EVT_HDR   hdr;
+    UNUSED(p_data);
 
     if (p_scb->p_ccb != NULL)
     {
@@ -1366,6 +1379,8 @@ void avdt_scb_snd_abort_req(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_snd_abort_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+
     avdt_msg_send_rsp(avdt_ccb_by_idx(p_data->msg.hdr.ccb_idx), AVDT_SIG_ABORT,
                       &p_data->msg);
 }
@@ -1382,6 +1397,7 @@ void avdt_scb_snd_abort_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 void avdt_scb_snd_close_req(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
     tAVDT_EVT_HDR   hdr;
+    UNUSED(p_data);
 
     p_scb->role = AVDT_CLOSE_INT;
 
@@ -1404,7 +1420,7 @@ void avdt_scb_snd_stream_close(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 #if AVDT_MULTIPLEXING == TRUE
     BT_HDR          *p_frag;
 
-    AVDT_TRACE_WARNING2("avdt_scb_snd_stream_close c:%d, off:%d",
+    AVDT_TRACE_WARNING("avdt_scb_snd_stream_close c:%d, off:%d",
         p_scb->frag_q.count, p_scb->frag_off);
     /* clean fragments queue */
     while((p_frag = (BT_HDR*)GKI_dequeue (&p_scb->frag_q)) != NULL)
@@ -1452,6 +1468,7 @@ void avdt_scb_snd_close_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 void avdt_scb_snd_getconfig_req(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
     tAVDT_EVT_HDR   hdr;
+    UNUSED(p_data);
 
     hdr.seid = p_scb->peer_seid;
 
@@ -1484,6 +1501,7 @@ void avdt_scb_snd_getconfig_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 void avdt_scb_snd_open_req(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
     tAVDT_EVT_HDR   hdr;
+    UNUSED(p_data);
 
     hdr.seid = p_scb->peer_seid;
 
@@ -1696,6 +1714,8 @@ void avdt_scb_snd_setconfig_rsp(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_snd_tc_close(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_data);
+
 #if AVDT_REPORTING == TRUE
     if(p_scb->curr_cfg.psc_mask & AVDT_PSC_REPORT)
         avdt_ad_close_req(AVDT_CHAN_REPORT, p_scb->p_ccb, p_scb);
@@ -1716,6 +1736,7 @@ void avdt_scb_snd_tc_close(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 void avdt_scb_cb_err(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
     tAVDT_CTRL          avdt_ctrl;
+    UNUSED(p_data);
 
     /* set error code and parameter */
     avdt_ctrl.hdr.err_code = AVDT_ERR_BAD_STATE;
@@ -1755,6 +1776,8 @@ void avdt_scb_cong_state(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_rej_state(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+
     p_data->msg.hdr.err_code = AVDT_ERR_BAD_STATE;
     p_data->msg.hdr.err_param = 0;
     avdt_msg_send_rej(avdt_ccb_by_idx(p_data->msg.hdr.ccb_idx),
@@ -1773,6 +1796,8 @@ void avdt_scb_rej_state(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_rej_in_use(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+
     p_data->msg.hdr.err_code = AVDT_ERR_IN_USE;
     p_data->msg.hdr.err_param = 0;
     avdt_msg_send_rej(avdt_ccb_by_idx(p_data->msg.hdr.ccb_idx),
@@ -1791,6 +1816,8 @@ void avdt_scb_rej_in_use(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_rej_not_in_use(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_scb);
+
     p_data->msg.hdr.err_code = AVDT_ERR_NOT_IN_USE;
     p_data->msg.hdr.err_param = 0;
     avdt_msg_send_rej(avdt_ccb_by_idx(p_data->msg.hdr.ccb_idx),
@@ -1808,6 +1835,8 @@ void avdt_scb_rej_not_in_use(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_set_remove(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_data);
+
     p_scb->remove = TRUE;
 }
 
@@ -1841,7 +1870,7 @@ void avdt_scb_free_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
          GKI_freebuf(p_frag);
 #endif
 
-    AVDT_TRACE_WARNING0("Dropped media packet");
+    AVDT_TRACE_WARNING("Dropped media packet");
 
     /* we need to call callback to keep data flow going */
     (*p_scb->cs.p_ctrl_cback)(avdt_scb_to_hdl(p_scb), NULL, AVDT_WRITE_CFM_EVT,
@@ -1866,6 +1895,7 @@ void avdt_scb_clr_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 #if AVDT_MULTIPLEXING == TRUE
     BT_HDR          *p_frag;
 #endif
+    UNUSED(p_data);
 
     /* set error code and parameter */
     avdt_ctrl.hdr.err_code = AVDT_ERR_BAD_STATE;
@@ -1885,7 +1915,7 @@ void avdt_scb_clr_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
         GKI_freebuf(p_scb->p_pkt);
         p_scb->p_pkt = NULL;
 
-        AVDT_TRACE_DEBUG0("Dropped stored media packet");
+        AVDT_TRACE_DEBUG("Dropped stored media packet");
 
         /* we need to call callback to keep data flow going */
         (*p_scb->cs.p_ctrl_cback)(avdt_scb_to_hdl(p_scb), NULL, AVDT_WRITE_CFM_EVT,
@@ -1894,7 +1924,7 @@ void avdt_scb_clr_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 #if AVDT_MULTIPLEXING == TRUE
     else if(!GKI_queue_is_empty (&p_scb->frag_q))
     {
-        AVDT_TRACE_DEBUG0("Dropped fragments queue");
+        AVDT_TRACE_DEBUG("Dropped fragments queue");
         /* clean fragments queue */
         while((p_frag = (BT_HDR*)GKI_dequeue (&p_scb->frag_q)) != NULL)
              GKI_freebuf(p_frag);
@@ -1930,6 +1960,7 @@ void avdt_scb_chk_snd_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
     UINT8   res = AVDT_AD_SUCCESS;
     tAVDT_SCB_EVT data;
 #endif
+    UNUSED(p_data);
 
     avdt_ctrl.hdr.err_code = 0;
 
@@ -1947,24 +1978,24 @@ void avdt_scb_chk_snd_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
         else
         {
 #if 0
-            AVDT_TRACE_DEBUG1("num_q=%d",
+            AVDT_TRACE_DEBUG("num_q=%d",
                 L2CA_FlushChannel(avdt_cb.ad.rt_tbl[avdt_ccb_to_idx(p_scb->p_ccb)][avdt_ad_type_to_tcid(AVDT_CHAN_MEDIA, p_scb)].lcid),
                                   L2CAP_FLUSH_CHANS_GET);
 #endif
             while((p_pkt = (BT_HDR*)GKI_dequeue (&p_scb->frag_q)) != NULL)
             {
                 sent = TRUE;
-                AVDT_TRACE_DEBUG1("Send fragment len=%d",p_pkt->len);
+                AVDT_TRACE_DEBUG("Send fragment len=%d",p_pkt->len);
                 /* fragments queue contains fragment to send */
                 res = avdt_ad_write_req(AVDT_CHAN_MEDIA, p_scb->p_ccb, p_scb, p_pkt);
                 if(AVDT_AD_CONGESTED == res)
                 {
                     p_scb->cong = TRUE;
-                    AVDT_TRACE_DEBUG0("avdt/l2c congested!!");
+                    AVDT_TRACE_DEBUG("avdt/l2c congested!!");
                     break;/* exit loop if channel became congested */
             }
             }
-            AVDT_TRACE_DEBUG2("res=%d left=%d",res, p_scb->frag_off);
+            AVDT_TRACE_DEBUG("res=%d left=%d",res, p_scb->frag_off);
 
             if(p_scb->frag_off)
             {
@@ -2003,6 +2034,8 @@ void avdt_scb_chk_snd_pkt(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_tc_timer(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
+    UNUSED(p_data);
+
     btu_start_timer(&p_scb->timer_entry, BTU_TTYPE_AVDT_SCB_TC, AVDT_SCB_TC_DISC_TOUT);
 }
 
@@ -2017,7 +2050,16 @@ void avdt_scb_tc_timer(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 *******************************************************************************/
 void avdt_scb_clr_vars(tAVDT_SCB *p_scb, tAVDT_SCB_EVT *p_data)
 {
-    p_scb->in_use = FALSE;
+    UNUSED(p_data);
+
+    if ((p_scb->cs.tsep == AVDT_TSEP_SNK) && (!p_scb->sink_activated))
+    {
+        p_scb->in_use = TRUE;
+    }
+    else
+    {
+        p_scb->in_use = FALSE;
+    }
     p_scb->p_ccb = NULL;
     p_scb->peer_seid = 0;
 }
@@ -2062,7 +2104,7 @@ void avdt_scb_queue_frags(tAVDT_SCB *p_scb, UINT8 **pp_data, UINT32 *p_data_len,
     else
     {
         num_frag = L2CA_FlushChannel(lcid, L2CAP_FLUSH_CHANS_GET);
-        AVDT_TRACE_DEBUG2("num_q=%d lcid=%d", num_frag, lcid);
+        AVDT_TRACE_DEBUG("num_q=%d lcid=%d", num_frag, lcid);
         if(num_frag >= AVDT_MAX_FRAG_COUNT)
         {
             num_frag = 0;
@@ -2076,7 +2118,7 @@ void avdt_scb_queue_frags(tAVDT_SCB *p_scb, UINT8 **pp_data, UINT32 *p_data_len,
     /* look up transport channel table entry to get peer mtu */
     p_tbl = avdt_ad_tc_tbl_by_type(AVDT_CHAN_MEDIA, p_scb->p_ccb, p_scb);
     buf_size = p_tbl->peer_mtu + BT_HDR_SIZE;
-    AVDT_TRACE_DEBUG3("peer_mtu: %d, buf_size: %d num_frag=%d",
+    AVDT_TRACE_DEBUG("peer_mtu: %d, buf_size: %d num_frag=%d",
         p_tbl->peer_mtu, buf_size, num_frag);
 
     if(buf_size > AVDT_DATA_POOL_SIZE)
@@ -2089,7 +2131,7 @@ void avdt_scb_queue_frags(tAVDT_SCB *p_scb, UINT8 **pp_data, UINT32 *p_data_len,
         /* allocate buffer for fragment */
         if(NULL == (p_frag = (BT_HDR*)GKI_getbuf(buf_size)))
         {
-            AVDT_TRACE_WARNING1("avdt_scb_queue_frags len=%d(out of GKI buffers)",*p_data_len);
+            AVDT_TRACE_WARNING("avdt_scb_queue_frags len=%d(out of GKI buffers)",*p_data_len);
             break;
         }
         /* fill fragment by chunk of media payload */
@@ -2104,7 +2146,7 @@ void avdt_scb_queue_frags(tAVDT_SCB *p_scb, UINT8 **pp_data, UINT32 *p_data_len,
         memcpy((UINT8*)(p_frag+1) + p_frag->offset, *pp_data, p_frag->len);
         *pp_data += p_frag->len;
         *p_data_len -= p_frag->len;
-        AVDT_TRACE_DEBUG1("Prepared fragment len=%d", p_frag->len);
+        AVDT_TRACE_DEBUG("Prepared fragment len=%d", p_frag->len);
 
         if(al_hdr)
         {

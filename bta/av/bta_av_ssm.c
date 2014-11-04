@@ -162,7 +162,7 @@ static const UINT8 bta_av_sst_incoming[][BTA_AV_NUM_COLS] =
 /* API_RC_OPEN_EVT  */      {BTA_AV_SIGNORE,        BTA_AV_SIGNORE,        BTA_AV_INCOMING_SST },
 /* SRC_DATA_READY_EVT */    {BTA_AV_SIGNORE,        BTA_AV_SIGNORE,        BTA_AV_INCOMING_SST },
 /* CI_SETCONFIG_OK_EVT */   {BTA_AV_SETCONFIG_RSP,  BTA_AV_ST_RC_TIMER,    BTA_AV_INCOMING_SST },
-/* CI_SETCONFIG_FAIL_EVT */ {BTA_AV_SETCONFIG_RSP,  BTA_AV_CLEANUP,        BTA_AV_INIT_SST },
+/* CI_SETCONFIG_FAIL_EVT */ {BTA_AV_SETCONFIG_REJ,  BTA_AV_CLEANUP,        BTA_AV_INIT_SST },
 /* SDP_DISC_OK_EVT */       {BTA_AV_FREE_SDB,       BTA_AV_SIGNORE,        BTA_AV_INCOMING_SST },
 /* SDP_DISC_FAIL_EVT */     {BTA_AV_FREE_SDB,       BTA_AV_SIGNORE,        BTA_AV_INCOMING_SST },
 /* STR_DISC_OK_EVT */       {BTA_AV_DISC_RES_AS_ACP,BTA_AV_SIGNORE,        BTA_AV_INCOMING_SST },
@@ -410,7 +410,7 @@ void bta_av_ssm_execute(tBTA_AV_SCB *p_scb, UINT16 event, tBTA_AV_DATA *p_data)
     if(p_scb == NULL)
     {
         /* this stream is not registered */
-        APPL_TRACE_EVENT0("AV channel not registered");
+        APPL_TRACE_EVENT("AV channel not registered");
         return;
     }
 
@@ -436,10 +436,10 @@ void bta_av_ssm_execute(tBTA_AV_SCB *p_scb, UINT16 event, tBTA_AV_DATA *p_data)
     }
 
 #if (defined(BTA_AV_DEBUG) && BTA_AV_DEBUG == TRUE)
-    APPL_TRACE_VERBOSE5("AV Sevent(0x%x)=0x%x(%s) state=%d(%s)",
+    APPL_TRACE_VERBOSE("AV Sevent(0x%x)=0x%x(%s) state=%d(%s)",
         p_scb->hndl, event, bta_av_evt_code(event), p_scb->state, bta_av_sst_code(p_scb->state));
 #else
-    APPL_TRACE_VERBOSE2("AV Sevent=0x%x state=%d", event, p_scb->state);
+    APPL_TRACE_VERBOSE("AV Sevent=0x%x state=%d", event, p_scb->state);
 #endif
 
     /* look up the state table for the current state */

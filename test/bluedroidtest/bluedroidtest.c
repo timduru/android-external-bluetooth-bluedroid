@@ -58,6 +58,8 @@
 
 #define CASE_RETURN_STR(const) case const: return #const;
 
+#define UNUSED __attribute__((unused))
+
 /************************************************************************************
 **  Local type definitions
 ************************************************************************************/
@@ -199,7 +201,7 @@ static void hex_dump(char *msg, void *data, int size, int trunc)
         if (n%16 == 1) {
             /* store address for this line */
             snprintf(addrstr, sizeof(addrstr), "%.4x",
-               ((unsigned int)p-(unsigned int)data) );
+               (unsigned int)((uintptr_t)p-(uintptr_t)data) );
         }
 
         c = *p;
@@ -469,7 +471,7 @@ static void adapter_state_changed(bt_state_t state)
     }
 }
 
-static void dut_mode_recv(uint16_t opcode, uint8_t *buf, uint8_t len)
+static void dut_mode_recv(uint16_t UNUSED opcode, uint8_t UNUSED *buf, uint8_t UNUSED len)
 {
     bdt_log("DUT MODE RECV : NOT IMPLEMENTED");
 }
@@ -482,28 +484,72 @@ static void le_test_mode(bt_status_t status, uint16_t packet_count)
 static bt_callbacks_t bt_callbacks = {
     sizeof(bt_callbacks_t),
     adapter_state_changed,
-    NULL, /*adapter_properties_cb */
+    NULL, /* adapter_properties_cb */
     NULL, /* remote_device_properties_cb */
     NULL, /* device_found_cb */
     NULL, /* discovery_state_changed_cb */
     NULL, /* pin_request_cb  */
     NULL, /* ssp_request_cb  */
-    NULL, /*bond_state_changed_cb */
+    NULL, /* bond_state_changed_cb */
     NULL, /* acl_state_changed_cb */
     NULL, /* thread_evt_cb */
-    dut_mode_recv, /*dut_mode_recv_cb */
-//    NULL, /*authorize_request_cb */
+    dut_mode_recv, /* dut_mode_recv_cb */
 #if BLE_INCLUDED == TRUE
-    le_test_mode /* le_test_mode_cb */
+    le_test_mode, /* le_test_mode_cb */
 #else
-    NULL
+    NULL, /* le_test_mode_cb */
 #endif
+    NULL /* energy_info_cb */
+};
+
+static bool set_wake_alarm(uint64_t delay_millis, bool should_wake, alarm_cb cb, void *data) {
+  static timer_t timer;
+  static bool timer_created;
+
+  if (!timer_created) {
+    struct sigevent sigevent;
+    memset(&sigevent, 0, sizeof(sigevent));
+    sigevent.sigev_notify = SIGEV_THREAD;
+    sigevent.sigev_notify_function = (void (*)(union sigval))cb;
+    sigevent.sigev_value.sival_ptr = data;
+    timer_create(CLOCK_MONOTONIC, &sigevent, &timer);
+    timer_created = true;
+  }
+
+  struct itimerspec new_value;
+  new_value.it_value.tv_sec = delay_millis / 1000;
+  new_value.it_value.tv_nsec = (delay_millis % 1000) * 1000 * 1000;
+  new_value.it_interval.tv_sec = 0;
+  new_value.it_interval.tv_nsec = 0;
+  timer_settime(timer, 0, &new_value, NULL);
+
+  return true;
+}
+
+static int acquire_wake_lock(const char *lock_name) {
+  return BT_STATUS_SUCCESS;
+}
+
+static int release_wake_lock(const char *lock_name) {
+  return BT_STATUS_SUCCESS;
+}
+
+static bt_os_callouts_t callouts = {
+    sizeof(bt_os_callouts_t),
+    set_wake_alarm,
+    acquire_wake_lock,
+    release_wake_lock,
 };
 
 void bdt_init(void)
 {
     bdt_log("INIT BT ");
     status = sBtInterface->init(&bt_callbacks);
+
+    if (status == BT_STATUS_SUCCESS) {
+        status = sBtInterface->set_os_callouts(&callouts);
+    }
+
     check_return_status(status);
 }
 
@@ -611,7 +657,7 @@ void bdt_cleanup(void)
  ** Console commands
  *******************************************************************************/
 
-void do_help(char *p)
+void do_help(char UNUSED *p)
 {
     int i = 0;
     int max = 0;
@@ -626,7 +672,7 @@ void do_help(char *p)
     }
 }
 
-void do_quit(char *p)
+void do_quit(char UNUSED *p)
 {
     bdt_shutdown();
 }
@@ -639,17 +685,17 @@ void do_quit(char *p)
  *
 */
 
-void do_init(char *p)
+void do_init(char UNUSED *p)
 {
     bdt_init();
 }
 
-void do_enable(char *p)
+void do_enable(char UNUSED *p)
 {
     bdt_enable();
 }
 
-void do_disable(char *p)
+void do_disable(char UNUSED *p)
 {
     bdt_disable();
 }
@@ -663,7 +709,7 @@ void do_le_test_mode(char *p)
     bdt_le_test_mode(p);
 }
 
-void do_cleanup(char *p)
+void do_cleanup(char UNUSED *p)
 {
     bdt_cleanup();
 }
@@ -731,7 +777,7 @@ static void process_cmd(char *p, unsigned char is_job)
     do_help(NULL);
 }
 
-int main (int argc, char * argv[])
+int main (int UNUSED argc, char UNUSED *argv[])
 {
     int opt;
     char cmd[128];

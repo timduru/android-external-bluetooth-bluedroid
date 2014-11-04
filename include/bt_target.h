@@ -1,5 +1,6 @@
 /******************************************************************************
  *
+ *  Copyright (c) 2014 The Android Open Source Project
  *  Copyright (C) 1999-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -33,6 +34,9 @@
 #define BTIF_HFAG_SERVICE_NAME  ("Handsfree Gateway")
 #endif
 
+#ifndef BTIF_HF_CLIENT_SERVICE_NAME
+#define BTIF_HF_CLIENT_SERVICE_NAME  ("Handsfree")
+#endif
 
 #ifdef BUILDCFG
 
@@ -106,10 +110,6 @@
 #define SMP_HOST_ENCRYPT_INCLUDED FALSE
 #endif
 
-#ifndef SAP_INCLUDED
-#define SAP_INCLUDED FALSE
-#endif
-
 #ifndef SBC_NO_PCM_CPY_OPTION
 #define SBC_NO_PCM_CPY_OPTION FALSE
 #endif
@@ -120,34 +120,6 @@
 
 #ifndef BTA_AG_INCLUDED
 #define BTA_AG_INCLUDED  TRUE
-#endif
-
-#ifndef BTA_CT_INCLUDED
-#define BTA_CT_INCLUDED  FALSE
-#endif
-
-#ifndef BTA_CG_INCLUDED
-#define BTA_CG_INCLUDED  FALSE
-#endif
-
-#ifndef BTA_DG_INCLUDED
-#define BTA_DG_INCLUDED  FALSE
-#endif
-
-#ifndef BTA_FT_INCLUDED
-#define BTA_FT_INCLUDED FALSE
-#endif
-
-#ifndef BTA_OP_INCLUDED
-#define BTA_OP_INCLUDED FALSE
-#endif
-
-#ifndef BTA_PR_INCLUDED
-#define BTA_PR_INCLUDED FALSE
-#endif
-
-#ifndef BTA_SS_INCLUDED
-#define BTA_SS_INCLUDED FALSE
 #endif
 
 #ifndef BTA_DM_INCLUDED
@@ -175,14 +147,6 @@
 #define BTA_FS_INCLUDED TRUE
 #endif
 
-#ifndef BTA_AC_INCLUDED
-#define BTA_AC_INCLUDED FALSE
-#endif
-
-#ifndef BTA_HD_INCLUDED
-#define BTA_HD_INCLUDED FALSE
-#endif
-
 #ifndef BTA_HH_INCLUDED
 #define BTA_HH_INCLUDED TRUE
 #endif
@@ -203,72 +167,12 @@
 #define BTA_AV_INCLUDED TRUE
 #endif
 
-#ifndef BTA_AV_VDP_INCLUDED
-#define BTA_AV_VDP_INCLUDED FALSE
-#endif
-
-#ifndef BTA_AVK_INCLUDED
-#define BTA_AVK_INCLUDED FALSE
-#endif
-
-#ifndef BTA_PBS_INCLUDED
-#define BTA_PBS_INCLUDED FALSE
-#endif
-
-#ifndef BTA_PBC_INCLUDED
-#define BTA_PBC_INCLUDED FALSE
-#endif
-
-#ifndef BTA_FM_INCLUDED
-#define BTA_FM_INCLUDED FALSE
-#endif
-
-#ifndef BTA_FM_DEBUG
-#define BTA_FM_DEBUG FALSE
-#endif
-
-#ifndef BTA_FMTX_INCLUDED
-#define BTA_FMTX_INCLUDED FALSE
-#endif
-
-#ifndef BTA_FMTX_DEBUG
-#define BTA_FMTX_DEBUG FALSE
-#endif
-
-#ifndef BTA_FMTX_FMRX_SWITCH_WORKAROUND
-#define BTA_FMTX_FMRX_SWITCH_WORKAROUND FALSE
-#endif
-
-#ifndef BTA_FMTX_US_FCC_RULES
-#define BTA_FMTX_US_FCC_RULES FALSE
-#endif
-
-#ifndef BTA_HS_INCLUDED
-#define BTA_HS_INCLUDED FALSE
-#endif
-
-#ifndef BTA_MSE_INCLUDED
-#define BTA_MSE_INCLUDED FALSE
-#endif
-
-#ifndef BTA_MCE_INCLUDED
-#define BTA_MCE_INCLUDED FALSE
-#endif
-
-#ifndef BTA_PLAYBACK_INCLUDED
-#define BTA_PLAYBACK_INCLUDED FALSE
-#endif
-
-#ifndef BTA_SSR_INCLUDED
-#define BTA_SSR_INCLUDED FALSE
-#endif
-
-#ifndef BTA_JV_INCLUDED
-#define BTA_JV_INCLUDED FALSE
-#endif
-
 #ifndef BTA_GATT_INCLUDED
 #define BTA_GATT_INCLUDED TRUE
+#endif
+
+#ifndef BTA_AV_SINK_INCLUDED
+#define BTA_AV_SINK_INCLUDED FALSE
 #endif
 
 #ifndef BTA_DISABLE_DELAY
@@ -360,11 +264,6 @@
 #define BTA_HOST_INTERLEAVE_SEARCH FALSE
 #endif
 
-/* This feature is used to skip query of ble read remote features*/
-#ifndef BTA_SKIP_BLE_READ_REMOTE_FEAT
-#define BTA_SKIP_BLE_READ_REMOTE_FEAT FALSE
-#endif
-
 #ifndef BT_TRACE_PROTOCOL
 #define BT_TRACE_PROTOCOL  TRUE
 #endif
@@ -405,16 +304,8 @@
 #define BTA_DM_SDP_DB_SIZE  8000
 #endif
 
-#ifndef FTS_REJECT_INVALID_OBEX_SET_PATH_REQ
-#define FTS_REJECT_INVALID_OBEX_SET_PATH_REQ FALSE
-#endif
-
 #ifndef HL_INCLUDED
 #define HL_INCLUDED  TRUE
-#endif
-
-#ifndef NO_GKI_RUN_RETURN
-#define NO_GKI_RUN_RETURN  TRUE
 #endif
 
 #ifndef AG_VOICE_SETTINGS
@@ -425,11 +316,15 @@
 #define BTIF_DM_OOB_TEST  TRUE
 #endif
 
+// How long to wait before activating sniff mode after entering the
+// idle state for FTS, OPS connections
+#ifndef BTA_FTS_OPS_IDLE_TO_SNIFF_DELAY_MS
+#define BTA_FTS_OPS_IDLE_TO_SNIFF_DELAY_MS 7000
+#endif
+
 //------------------End added from bdroid_buildcfg.h---------------------
 
 
-
-/* #define BYPASS_AVDATATRACE */
 
 /******************************************************************************
 **
@@ -643,6 +538,8 @@
 
 #ifndef PAN_POOL_ID
 #define PAN_POOL_ID                 GKI_POOL_ID_3
+/* Maximum amount of the shared buffer to allocate for PAN */
+#define PAN_POOL_MAX                (GKI_BUF3_MAX / 4)
 #endif
 
 /* UNV pool for read/write serialization */
@@ -701,6 +598,11 @@
 /* GATT Server Database pool ID */
 #ifndef GATT_DB_POOL_ID
 #define GATT_DB_POOL_ID                 GKI_POOL_ID_8
+#endif
+
+/* GATT Data sending buffer pool ID, use default ACL pool for fix channel data */
+#ifndef GATT_BUF_POOL_ID
+#define GATT_BUF_POOL_ID                HCI_ACL_POOL_ID
 #endif
 
 /******************************************************************************
@@ -1034,7 +936,7 @@ and USER_HW_DISABLE_API macros */
 
 /* The number of SCO links. */
 #ifndef BTM_MAX_SCO_LINKS
-#define BTM_MAX_SCO_LINKS           2
+#define BTM_MAX_SCO_LINKS           3
 #endif
 
 /* The preferred type of SCO links (2-eSCO, 0-SCO). */
@@ -1136,16 +1038,6 @@ and USER_HW_DISABLE_API macros */
 /* Maximum number of callbacks that can be registered using BTM_RegisterForVSEvents */
 #ifndef BTM_MAX_VSE_CALLBACKS
 #define BTM_MAX_VSE_CALLBACKS           3
-#endif
-
-/* Number of streams for dual stack */
-#ifndef BTM_SYNC_INFO_NUM_STR
-#define BTM_SYNC_INFO_NUM_STR           2
-#endif
-
-/* Number of streams for dual stack in BT Controller */
-#ifndef BTM_SYNC_INFO_NUM_STR_BTC
-#define BTM_SYNC_INFO_NUM_STR_BTC       2
 #endif
 
 /******************************************
@@ -1411,8 +1303,29 @@ and USER_HW_DISABLE_API macros */
 #define BLE_INCLUDED            TRUE
 #endif
 
+#ifndef BLE_ANDROID_CONTROLLER_SCAN_FILTER
+#define BLE_ANDROID_CONTROLLER_SCAN_FILTER            TRUE
+#endif
+
 #ifndef LOCAL_BLE_CONTROLLER_ID
 #define LOCAL_BLE_CONTROLLER_ID         (1)
+#endif
+
+#ifndef BLE_PRIVACY_SPT
+#define BLE_PRIVACY_SPT         TRUE
+#endif
+
+#ifndef BLE_VND_INCLUDED
+#define BLE_VND_INCLUDED        FALSE
+#endif
+
+#ifndef BTM_BLE_ADV_TX_POWER
+#define BTM_BLE_ADV_TX_POWER {-21, -15, -7, 1, 9}
+#endif
+
+
+#ifndef BLE_BATCH_SCAN_INCLUDED
+#define BLE_BATCH_SCAN_INCLUDED  TRUE
 #endif
 
 /******************************************************************************
@@ -1420,6 +1333,24 @@ and USER_HW_DISABLE_API macros */
 ** ATT/GATT Protocol/Profile Settings
 **
 ******************************************************************************/
+#ifndef BTA_GATT_INCLUDED
+#if BLE_INCLUDED == TRUE
+#define BTA_GATT_INCLUDED TRUE
+#else
+#define BTA_GATT_INCLUDED FALSE
+#endif
+#endif
+
+#if BTA_GATT_INCLUDED == TRUE && BLE_INCLUDED == FALSE
+#error "can't have GATT without BLE"
+#endif
+
+#ifndef BLE_LLT_INCLUDED
+#define BLE_LLT_INCLUDED    TRUE
+#endif
+#ifndef BTM_DUMO_ADDR_CENTRAL_ENABLED
+#define BTM_DUMO_ADDR_CENTRAL_ENABLED    FALSE
+#endif
 #ifndef ATT_INCLUDED
 #define ATT_INCLUDED         TRUE
 #endif
@@ -1436,12 +1367,34 @@ and USER_HW_DISABLE_API macros */
 #define GATT_CLIENT_ENABLED          TRUE
 #endif
 
+#ifndef BLE_PERIPHERAL_MODE_SUPPORT
+#define BLE_PERIPHERAL_MODE_SUPPORT  TRUE
+#endif
+
+#ifndef BLE_PERIPHERAL_ADV_NAME
+#define BLE_PERIPHERAL_ADV_NAME      FALSE
+#endif
+
+#ifndef BLE_DELAY_REQUEST_ENC
+/* This flag is to work around IPHONE problem, We need to wait for iPhone ready
+   before send encryption request to iPhone */
+#define BLE_DELAY_REQUEST_ENC        FALSE
+#endif
+
+#ifndef GAP_TRANSPORT_SUPPORTED
+#define GAP_TRANSPORT_SUPPORTED      GATT_TRANSPORT_LE_BR_EDR
+#endif
+
+#ifndef GATTP_TRANSPORT_SUPPORTED
+#define GATTP_TRANSPORT_SUPPORTED    GATT_TRANSPORT_LE_BR_EDR
+#endif
+
 #ifndef GATT_MAX_SR_PROFILES
 #define GATT_MAX_SR_PROFILES        32 /* max is 32 */
 #endif
 
 #ifndef GATT_MAX_APPS
-#define GATT_MAX_APPS            10 /* note: 2 apps used internally GATT and GAP */
+#define GATT_MAX_APPS            32 /* note: 2 apps used internally GATT and GAP */
 #endif
 
 #ifndef GATT_MAX_CL_PROFILES
@@ -1469,7 +1422,15 @@ and USER_HW_DISABLE_API macros */
 **
 ******************************************************************************/
 #ifndef SMP_INCLUDED
+#if BLE_INCLUDED == TRUE
 #define SMP_INCLUDED         TRUE
+#else
+#define SMP_INCLUDED         FALSE
+#endif
+#endif
+
+#if SMP_INCLUDED == TRUE && BLE_INCLUDED == FALSE
+#error "can't have SMP without BLE"
 #endif
 
 #ifndef SMP_DEBUG
@@ -1569,7 +1530,7 @@ and USER_HW_DISABLE_API macros */
 
 /* The MTU size for the L2CAP configuration. */
 #ifndef SDP_MTU_SIZE
-#define SDP_MTU_SIZE                256
+#define SDP_MTU_SIZE                672
 #endif
 
 /* The flush timeout for the L2CAP configuration. */
@@ -3367,7 +3328,6 @@ Range: Minimum 12000 (12 secs) on BR/EDR when supporting PBF.
 #define SAP_SERVER_INCLUDED         FALSE
 #endif
 
-
 /*************************************************************************
  * A2DP Definitions
  */
@@ -3497,6 +3457,10 @@ Range: Minimum 12000 (12 secs) when supporting PBF.
 
 #ifndef AVRC_ADV_CTRL_INCLUDED
 #define AVRC_ADV_CTRL_INCLUDED      TRUE
+#endif
+
+#ifndef AVRC_CTLR_INCLUDED
+#define AVRC_CTLR_INCLUDED          TRUE
 #endif
 
 /******************************************************************************
@@ -3820,4 +3784,3 @@ The maximum number of payload octets that the local device can receive in a sing
 #include "bt_trace.h"
 
 #endif /* BT_TARGET_H */
-

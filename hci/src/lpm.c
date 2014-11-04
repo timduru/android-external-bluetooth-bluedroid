@@ -31,6 +31,8 @@
 #include <time.h>
 #include "bt_hci_bdroid.h"
 #include "bt_vendor_lib.h"
+#include "bt_utils.h"
+#include "vendor.h"
 
 /******************************************************************************
 **  Constants & Macros
@@ -53,8 +55,6 @@
 /******************************************************************************
 **  Externs
 ******************************************************************************/
-
-extern bt_vendor_interface_t *bt_vnd_if;
 
 /******************************************************************************
 **  Local type definitions
@@ -109,12 +109,13 @@ static bt_lpm_cb_t bt_lpm_cb;
 *******************************************************************************/
 static void lpm_idle_timeout(union sigval arg)
 {
+    UNUSED(arg);
     BTLPMDBG("..lpm_idle_timeout..");
 
     if ((bt_lpm_cb.state == LPM_ENABLED) && \
         (bt_lpm_cb.wake_state == LPM_WAKE_W4_TIMEOUT))
     {
-        bthc_signal_event(HC_EVENT_LPM_IDLE_TIMEOUT);
+        bthc_idle_timeout();
     }
 }
 
@@ -152,7 +153,7 @@ static void lpm_start_transport_idle_timer(void)
     if (bt_lpm_cb.timer_created == TRUE)
     {
         ts.it_value.tv_sec = bt_lpm_cb.timeout_ms/1000;
-        ts.it_value.tv_nsec = 1000*(bt_lpm_cb.timeout_ms%1000);
+        ts.it_value.tv_nsec = 1000000*(bt_lpm_cb.timeout_ms%1000);
         ts.it_interval.tv_sec = 0;
         ts.it_interval.tv_nsec = 0;
 
@@ -249,12 +250,7 @@ void lpm_vnd_cback(uint8_t vnd_result)
 void lpm_init(void)
 {
     memset(&bt_lpm_cb, 0, sizeof(bt_lpm_cb_t));
-
-    /* Calling vendor-specific part */
-    if (bt_vnd_if)
-        bt_vnd_if->op(BT_VND_OP_GET_LPM_IDLE_TIMEOUT, &(bt_lpm_cb.timeout_ms));
-    else
-        bt_lpm_cb.timeout_ms = DEFAULT_LPM_IDLE_TIMEOUT;
+    vendor_send_command(BT_VND_OP_GET_LPM_IDLE_TIMEOUT, &bt_lpm_cb.timeout_ms);
 }
 
 /*******************************************************************************
@@ -304,13 +300,9 @@ void lpm_enable(uint8_t turn_on)
             bt_hc_cbacks->lpm_cb(BT_HC_LPM_DISABLED);
     }
 
-    /* Calling vendor-specific part */
-    if (bt_vnd_if)
-    {
-        uint8_t lpm_cmd = (turn_on) ? BT_VND_LPM_ENABLE : BT_VND_LPM_DISABLE;
-        bt_lpm_cb.state = (turn_on) ? LPM_ENABLING : LPM_DISABLING;
-        bt_vnd_if->op(BT_VND_OP_LPM_SET_MODE, &lpm_cmd);
-    }
+    uint8_t lpm_cmd = (turn_on) ? BT_VND_LPM_ENABLE : BT_VND_LPM_DISABLE;
+    bt_lpm_cb.state = (turn_on) ? LPM_ENABLING : LPM_DISABLING;
+    vendor_send_command(BT_VND_OP_LPM_SET_MODE, &lpm_cmd);
 }
 
 /*******************************************************************************
@@ -357,11 +349,8 @@ void lpm_wake_assert(void)
         BTLPMDBG("LPM WAKE assert");
 
         /* Calling vendor-specific part */
-        if (bt_vnd_if)
-        {
-            uint8_t state = BT_VND_LPM_WAKE_ASSERT;
-            bt_vnd_if->op(BT_VND_OP_LPM_WAKE_SET_STATE, &state);
-        }
+        uint8_t state = BT_VND_LPM_WAKE_ASSERT;
+        vendor_send_command(BT_VND_OP_LPM_WAKE_SET_STATE, &state);
 
         lpm_stop_transport_idle_timer();
 
@@ -412,14 +401,8 @@ void lpm_wake_deassert(void)
     {
         BTLPMDBG("LPM WAKE deassert");
 
-        /* Calling vendor-specific part */
-        if (bt_vnd_if)
-        {
-            uint8_t state = BT_VND_LPM_WAKE_DEASSERT;
-            bt_vnd_if->op(BT_VND_OP_LPM_WAKE_SET_STATE, &state);
-        }
-
+        uint8_t state = BT_VND_LPM_WAKE_DEASSERT;
+        vendor_send_command(BT_VND_OP_LPM_WAKE_SET_STATE, &state);
         bt_lpm_cb.wake_state = LPM_WAKE_DEASSERTED;
     }
 }
-

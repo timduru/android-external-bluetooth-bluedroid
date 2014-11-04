@@ -25,79 +25,44 @@
 **
 *****************************************************************************/
 
-#include <stdio.h>
-#include <stdarg.h>
-#include <errno.h>
+#include <assert.h>
 #include <sys/times.h>
 
-#include <pthread.h>  /* must be 1st header defined  */
-#include <time.h>
 #include "gki_int.h"
 #include "bt_utils.h"
 
 #define LOG_TAG "GKI_LINUX"
 
 #include <utils/Log.h>
+#include <hardware/bluetooth.h>
 
 /*****************************************************************************
 **  Constants & Macros
 ******************************************************************************/
-
-#ifndef GKI_TICK_TIMER_DEBUG
-#define GKI_TICK_TIMER_DEBUG FALSE
-#endif
-
-#define GKI_INFO(fmt, ...) ALOGI ("%s: " fmt, __FUNCTION__, ## __VA_ARGS__)
-
-/* always log errors */
-#define GKI_ERROR_LOG(fmt, ...)  ALOGE ("##### ERROR : %s: " fmt "#####", __FUNCTION__, ## __VA_ARGS__)
-
-#if defined (GKI_TICK_TIMER_DEBUG) && (GKI_TICK_TIMER_DEBUG == TRUE)
-#define GKI_TIMER_TRACE(fmt, ...) ALOGI ("%s: " fmt, __FUNCTION__, ## __VA_ARGS__)
-#else
-#define GKI_TIMER_TRACE(fmt, ...)
-#endif
-
 
 #define SCHED_NORMAL 0
 #define SCHED_FIFO 1
 #define SCHED_RR 2
 #define SCHED_BATCH 3
 
-#define NANOSEC_PER_MILLISEC (1000000)
-#define NSEC_PER_SEC (1000*NANOSEC_PER_MILLISEC)
+#define NANOSEC_PER_MILLISEC    1000000
+#define NSEC_PER_SEC            (1000 * NANOSEC_PER_MILLISEC)
+#define USEC_PER_SEC            1000000
+#define NSEC_PER_USEC           1000
 
-/* works only for 1ms to 1000ms heart beat ranges */
-#define LINUX_SEC (1000/TICKS_PER_SEC)
-
-#define LOCK(m)  pthread_mutex_lock(&m)
-#define UNLOCK(m) pthread_mutex_unlock(&m)
-#define INIT(m) pthread_mutex_init(&m, NULL)
-
-#define WAKE_LOCK_ID "brcm_btld"
-#define PARTIAL_WAKE_LOCK 1
+#define WAKE_LOCK_ID "bluedroid_timer"
 
 #if GKI_DYNAMIC_MEMORY == FALSE
 tGKI_CB   gki_cb;
-#endif
-
-#ifdef NO_GKI_RUN_RETURN
-static pthread_t            timer_thread_id = 0;
-static int                  shutdown_timer = 0;
 #endif
 
 #ifndef GKI_SHUTDOWN_EVT
 #define GKI_SHUTDOWN_EVT    APPL_EVT_7
 #endif
 
-#define  __likely(cond)    __builtin_expect(!!(cond), 1)
-#define  __unlikely(cond)  __builtin_expect(!!(cond), 0)
-
 /*****************************************************************************
 **  Local type definitions
 ******************************************************************************/
-
-#define pthread_cond_timedwait_monotonic pthread_cond_timedwait
 
 typedef struct
 {
@@ -106,28 +71,173 @@ typedef struct
     UINT32 params;          /* Extra params to pass to task entry function */
 } gki_pthread_info_t;
 
+// Alarm service structure used to pass up via JNI to the bluetooth
+// app in order to create a wakeable Alarm.
+typedef struct
+{
+    UINT32 ticks_scheduled;
+    UINT64 timer_started_us;
+    UINT64 timer_last_expired_us;
+    bool wakelock;
+} alarm_service_t;
 
 /*****************************************************************************
 **  Static variables
 ******************************************************************************/
 
-int g_GkiTimerWakeLockOn = 0;
 gki_pthread_info_t gki_pthread_info[GKI_MAX_TASKS];
 
-/*****************************************************************************
-**  Static functions
-******************************************************************************/
+// Only a single alarm is used to wake bluedroid.
+// NOTE: Must be manipulated with the GKI_disable() lock held.
+static alarm_service_t alarm_service;
+
+static timer_t posix_timer;
+static bool timer_created;
+
+
+// If the next wakeup time is less than this threshold, we should acquire
+// a wakelock instead of setting a wake alarm so we're not bouncing in
+// and out of suspend frequently.
+static const uint32_t TIMER_INTERVAL_FOR_WAKELOCK_IN_MS = 3000;
 
 /*****************************************************************************
 **  Externs
 ******************************************************************************/
 
-extern int acquire_wake_lock(int lock, const char* id);
-extern int release_wake_lock(const char* id);
+extern bt_os_callouts_t *bt_os_callouts;
 
 /*****************************************************************************
 **  Functions
 ******************************************************************************/
+
+static UINT64 now_us()
+{
+    struct timespec ts_now;
+    clock_gettime(CLOCK_BOOTTIME, &ts_now);
+    return ((UINT64)ts_now.tv_sec * USEC_PER_SEC) + ((UINT64)ts_now.tv_nsec / NSEC_PER_USEC);
+}
+
+static bool set_nonwake_alarm(UINT64 delay_millis)
+{
+    if (!timer_created)
+    {
+        ALOGE("%s timer is not available, not setting timer for %llums", __func__, delay_millis);
+        return false;
+    }
+
+    const UINT64 now = now_us();
+    alarm_service.timer_started_us = now;
+
+    UINT64 prev_timer_delay = 0;
+    if (alarm_service.timer_last_expired_us)
+        prev_timer_delay = now - alarm_service.timer_last_expired_us;
+
+    UINT64 delay_micros = delay_millis * 1000;
+    if (delay_micros > prev_timer_delay)
+        delay_micros -= prev_timer_delay;
+    else
+        delay_micros = 1;
+
+    struct itimerspec new_value;
+    memset(&new_value, 0, sizeof(new_value));
+    new_value.it_value.tv_sec = (delay_micros / USEC_PER_SEC);
+    new_value.it_value.tv_nsec = (delay_micros % USEC_PER_SEC) * NSEC_PER_USEC;
+    if (timer_settime(posix_timer, 0, &new_value, NULL) == -1)
+    {
+        ALOGE("%s unable to set timer: %s", __func__, strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+/** Callback from Java thread after alarm from AlarmService fires. */
+static void bt_alarm_cb(void *data)
+{
+    alarm_service.timer_last_expired_us = now_us();
+    UINT32 ticks_taken = GKI_MS_TO_TICKS((alarm_service.timer_last_expired_us
+                                        - alarm_service.timer_started_us) / 1000);
+
+    GKI_timer_update(ticks_taken > alarm_service.ticks_scheduled
+                   ? ticks_taken : alarm_service.ticks_scheduled);
+}
+
+/** NOTE: This is only called on init and may be called without the GKI_disable()
+  * lock held.
+  */
+static void alarm_service_init()
+{
+    alarm_service.ticks_scheduled = 0;
+    alarm_service.timer_started_us = 0;
+    alarm_service.timer_last_expired_us = 0;
+    alarm_service.wakelock = FALSE;
+    raise_priority_a2dp(TASK_JAVA_ALARM);
+}
+
+/** Requests an alarm from AlarmService to fire when the next
+  * timer in the timer queue is set to expire. Only takes a wakelock
+  * if the timer tick expiration is a short interval in the future
+  * and releases the wakelock if the timer is a longer interval
+  * or if there are no more timers in the queue.
+  *
+  * NOTE: Must be called with GKI_disable() lock held.
+  */
+void alarm_service_reschedule()
+{
+    int32_t ticks_till_next_exp = GKI_ready_to_sleep();
+
+    assert(ticks_till_next_exp >= 0);
+    alarm_service.ticks_scheduled = ticks_till_next_exp;
+
+    // No more timers remaining. Release wakelock if we're holding one.
+    if (ticks_till_next_exp == 0)
+    {
+        alarm_service.timer_last_expired_us = 0;
+        alarm_service.timer_started_us = 0;
+        if (alarm_service.wakelock)
+        {
+            ALOGV("%s releasing wake lock.", __func__);
+            alarm_service.wakelock = false;
+            int rc = bt_os_callouts->release_wake_lock(WAKE_LOCK_ID);
+            if (rc != BT_STATUS_SUCCESS)
+            {
+                ALOGE("%s unable to release wake lock with no timers: %d", __func__, rc);
+            }
+        }
+        ALOGV("%s no more alarms.", __func__);
+        return;
+    }
+
+    UINT64 ticks_in_millis = GKI_TICKS_TO_MS(ticks_till_next_exp);
+    if (ticks_in_millis <= TIMER_INTERVAL_FOR_WAKELOCK_IN_MS)
+    {
+        // The next deadline is close, just take a wakelock and set a regular (non-wake) timer.
+        int rc = bt_os_callouts->acquire_wake_lock(WAKE_LOCK_ID);
+        if (rc != BT_STATUS_SUCCESS)
+        {
+            ALOGE("%s unable to acquire wake lock: %d", __func__, rc);
+            return;
+        }
+        alarm_service.wakelock = true;
+        ALOGV("%s acquired wake lock, setting short alarm (%lldms).", __func__, ticks_in_millis);
+
+        if (!set_nonwake_alarm(ticks_in_millis))
+        {
+            ALOGE("%s unable to set short alarm.", __func__);
+        }
+    } else {
+        // The deadline is far away, set a wake alarm and release wakelock if we're holding it.
+        alarm_service.timer_started_us = now_us();
+        alarm_service.timer_last_expired_us = 0;
+        if (!bt_os_callouts->set_wake_alarm(ticks_in_millis, true, bt_alarm_cb, &alarm_service))
+        {
+            ALOGE("%s unable to set long alarm, releasing wake lock anyway.", __func__);
+        } else {
+            ALOGV("%s set long alarm (%lldms), releasing wake lock.", __func__, ticks_in_millis);
+        }
+        alarm_service.wakelock = false;
+        bt_os_callouts->release_wake_lock(WAKE_LOCK_ID);
+    }
+}
 
 
 /*****************************************************************************
@@ -139,26 +249,24 @@ extern int release_wake_lock(const char* id);
 ** Returns         void
 **
 *******************************************************************************/
-
-void gki_task_entry(UINT32 params)
+static void gki_task_entry(UINT32 params)
 {
     gki_pthread_info_t *p_pthread_info = (gki_pthread_info_t *)params;
     gki_cb.os.thread_id[p_pthread_info->task_id] = pthread_self();
 
     prctl(PR_SET_NAME, (unsigned long)gki_cb.com.OSTName[p_pthread_info->task_id], 0, 0, 0);
 
-    GKI_INFO("gki_task_entry task_id=%i [%s] starting\n", p_pthread_info->task_id,
+    ALOGI("gki_task_entry task_id=%i [%s] starting\n", p_pthread_info->task_id,
                 gki_cb.com.OSTName[p_pthread_info->task_id]);
 
     /* Call the actual thread entry point */
     (p_pthread_info->task_entry)(p_pthread_info->params);
 
-    GKI_INFO("gki_task task_id=%i [%s] terminating\n", p_pthread_info->task_id,
+    ALOGI("gki_task task_id=%i [%s] terminating\n", p_pthread_info->task_id,
                 gki_cb.com.OSTName[p_pthread_info->task_id]);
 
     pthread_exit(0);    /* GKI tasks have no return value */
 }
-/* end android */
 
 /*******************************************************************************
 **
@@ -180,6 +288,8 @@ void GKI_init(void)
 
     gki_buffer_init();
     gki_timers_init();
+    alarm_service_init();
+
     gki_cb.com.OSTicks = (UINT32) times(0);
 
     pthread_mutexattr_init(&attr);
@@ -196,13 +306,17 @@ void GKI_init(void)
     /* pthread_mutex_init(&thread_delay_mutex, NULL); */  /* used in GKI_delay */
     /* pthread_cond_init (&thread_delay_cond, NULL); */
 
-    /* Initialiase GKI_timer_update suspend variables & mutexes to be in running state.
-     * this works too even if GKI_NO_TICK_STOP is defined in btld.txt */
-    p_os->no_timer_suspend = GKI_TIMER_TICK_RUN_COND;
-    pthread_mutex_init(&p_os->gki_timer_mutex, NULL);
-#ifndef NO_GKI_RUN_RETURN
-    pthread_cond_init(&p_os->gki_timer_cond, NULL);
-#endif
+    struct sigevent sigevent;
+    memset(&sigevent, 0, sizeof(sigevent));
+    sigevent.sigev_notify = SIGEV_THREAD;
+    sigevent.sigev_notify_function = (void (*)(union sigval))bt_alarm_cb;
+    sigevent.sigev_value.sival_ptr = NULL;
+    if (timer_create(CLOCK_REALTIME, &sigevent, &posix_timer) == -1) {
+        ALOGE("%s unable to create POSIX timer: %s", __func__, strerror(errno));
+        timer_created = false;
+    } else {
+        timer_created = true;
+    }
 }
 
 
@@ -217,8 +331,7 @@ void GKI_init(void)
 *******************************************************************************/
 UINT32 GKI_get_os_tick_count(void)
 {
-     /* TODO - add any OS specific code here */
-    return (gki_cb.com.OSTicks);
+    return gki_cb.com.OSTicks;
 }
 
 /*******************************************************************************
@@ -247,13 +360,15 @@ UINT8 GKI_create_task (TASKPTR task_entry, UINT8 task_id, INT8 *taskname, UINT16
     struct sched_param param;
     int policy, ret = 0;
     pthread_attr_t attr1;
+    UNUSED(stack);
+    UNUSED(stacksize);
 
     GKI_TRACE( "GKI_create_task %x %d %s %x %d", (int)task_entry, (int)task_id,
             (char*) taskname, (int) stack, (int)stacksize);
 
     if (task_id >= GKI_MAX_TASKS)
     {
-        GKI_ERROR_LOG("Error! task ID > max task allowed");
+        ALOGE("Error! task ID > max task allowed");
         return (GKI_FAILURE);
     }
 
@@ -264,8 +379,12 @@ UINT8 GKI_create_task (TASKPTR task_entry, UINT8 task_id, INT8 *taskname, UINT16
     gki_cb.com.OSWaitEvt[task_id]   = 0;
 
     /* Initialize mutex and condition variable objects for events and timeouts */
+    pthread_condattr_t cond_attr;
+    pthread_condattr_init(&cond_attr);
+    pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
+
     pthread_mutex_init(&gki_cb.os.thread_evt_mutex[task_id], NULL);
-    pthread_cond_init (&gki_cb.os.thread_evt_cond[task_id], NULL);
+    pthread_cond_init (&gki_cb.os.thread_evt_cond[task_id], &cond_attr);
     pthread_mutex_init(&gki_cb.os.thread_timeout_mutex[task_id], NULL);
     pthread_cond_init (&gki_cb.os.thread_timeout_cond[task_id], NULL);
 
@@ -292,7 +411,7 @@ UINT8 GKI_create_task (TASKPTR task_entry, UINT8 task_id, INT8 *taskname, UINT16
 
     if (ret != 0)
     {
-         GKI_ERROR_LOG("pthread_create failed(%d), %s!\n\r", ret, taskname);
+         ALOGE("pthread_create failed(%d), %s!", ret, taskname);
          return GKI_FAILURE;
     }
 
@@ -311,8 +430,10 @@ UINT8 GKI_create_task (TASKPTR task_entry, UINT8 task_id, INT8 *taskname, UINT16
          {
              /* check if define in gki_int.h is correct for this compile environment! */
              policy = GKI_LINUX_BASE_POLICY;
-#if (GKI_LINUX_BASE_POLICY!=GKI_SCHED_NORMAL)
+#if (GKI_LINUX_BASE_POLICY != GKI_SCHED_NORMAL)
              param.sched_priority = GKI_LINUX_BASE_PRIORITY - task_id - 2;
+#else
+             param.sched_priority = 0;
 #endif
          }
          pthread_setschedparam(gki_cb.os.thread_id[task_id], policy, &param);
@@ -375,11 +496,11 @@ void GKI_destroy_task(UINT8 task_id)
         result = pthread_join( gki_cb.os.thread_id[task_id], NULL );
         if ( result < 0 )
         {
-            GKI_ERROR_LOG( "pthread_join() FAILED: result: %d", result );
+            ALOGE( "pthread_join() FAILED: result: %d", result );
         }
 #endif
         GKI_exit_task(task_id);
-        GKI_INFO( "GKI_shutdown(): task [%s] terminated\n", gki_cb.com.OSTName[task_id]);
+        ALOGI( "GKI_shutdown(): task [%s] terminated\n", gki_cb.com.OSTName[task_id]);
     }
 }
 
@@ -407,7 +528,7 @@ void GKI_task_self_cleanup(UINT8 task_id)
 
     if (task_id != my_task_id)
     {
-        GKI_ERROR_LOG("%s: Wrong context - current task %d is not the given task id %d",\
+        ALOGE("%s: Wrong context - current task %d is not the given task id %d",\
                       __FUNCTION__, my_task_id, task_id);
         return;
     }
@@ -500,7 +621,6 @@ void GKI_shutdown(void)
                 ALOGE( "pthread_join() FAILED: result: %d", result );
             }
 #endif
-            // GKI_ERROR_LOG( "GKI_shutdown(): task %s dead\n", gki_cb.com.OSTName[task_id]);
             GKI_exit_task(task_id - 1);
         }
     }
@@ -518,201 +638,11 @@ void GKI_shutdown(void)
     i = 0;
 #endif
 
-#ifdef NO_GKI_RUN_RETURN
-    shutdown_timer = 1;
-#endif
-    if (g_GkiTimerWakeLockOn)
-    {
-        GKI_TRACE("GKI_shutdown :  release_wake_lock(brcm_btld)");
-        release_wake_lock(WAKE_LOCK_ID);
-        g_GkiTimerWakeLockOn = 0;
+    if (timer_created) {
+        timer_delete(posix_timer);
+        timer_created = false;
     }
 }
-
-/*******************************************************************************
- **
- ** Function        gki_system_tick_start_stop_cback
- **
- ** Description     This function runs a task
- **
- ** Parameters:     start: TRUE start system tick (again), FALSE stop
- **
- ** Returns         void
- **
- *********************************************************************************/
-
-void gki_system_tick_start_stop_cback(BOOLEAN start)
-{
-    tGKI_OS         *p_os = &gki_cb.os;
-    int    *p_run_cond = &p_os->no_timer_suspend;
-    static int wake_lock_count;
-
-    if ( FALSE == start )
-    {
-        /* gki_system_tick_start_stop_cback() maybe called even so it was already stopped! */
-        if (GKI_TIMER_TICK_RUN_COND == *p_run_cond)
-        {
-#ifdef NO_GKI_RUN_RETURN
-            /* take free mutex to block timer thread */
-            pthread_mutex_lock(&p_os->gki_timer_mutex);
-#endif
-            /* this can lead to a race condition. however as we only read this variable in the
-             * timer loop we should be fine with this approach. otherwise uncomment below mutexes.
-             */
-            /* GKI_disable(); */
-            *p_run_cond = GKI_TIMER_TICK_STOP_COND;
-            /* GKI_enable(); */
-
-            GKI_TIMER_TRACE(">>> STOP GKI_timer_update(), wake_lock_count:%d", --wake_lock_count);
-
-            release_wake_lock(WAKE_LOCK_ID);
-            g_GkiTimerWakeLockOn = 0;
-        }
-    }
-    else
-    {
-        /* restart GKI_timer_update() loop */
-        acquire_wake_lock(PARTIAL_WAKE_LOCK, WAKE_LOCK_ID);
-
-        g_GkiTimerWakeLockOn = 1;
-        *p_run_cond = GKI_TIMER_TICK_RUN_COND;
-
-#ifdef NO_GKI_RUN_RETURN
-        pthread_mutex_unlock( &p_os->gki_timer_mutex );
-#else
-        pthread_mutex_lock( &p_os->gki_timer_mutex );
-        pthread_cond_signal( &p_os->gki_timer_cond );
-        pthread_mutex_unlock( &p_os->gki_timer_mutex );
-#endif
-
-        GKI_TIMER_TRACE(">>> START GKI_timer_update(), wake_lock_count:%d", ++wake_lock_count );
-    }
-}
-
-
-/*******************************************************************************
-**
-** Function         GKI_run
-**
-** Description      This function runs a task
-****
-** Returns          void
-**
-** NOTE             This function is only needed for operating systems where
-**                  starting a task is a 2-step process. Most OS's do it in
-**                  one step, If your OS does it in one step, this function
-**                  should be empty.
-*********************************************************************************/
-#ifdef NO_GKI_RUN_RETURN
-void* timer_thread(void *arg)
-{
-    int timeout_ns=0;
-    struct timespec timeout;
-    struct timespec previous = {0,0};
-    struct timespec current;
-    int err;
-    int delta_ns;
-    int restart;
-    tGKI_OS         *p_os = &gki_cb.os;
-    int  *p_run_cond = &p_os->no_timer_suspend;
-
-    /* Indicate that tick is just starting */
-    restart = 1;
-
-    prctl(PR_SET_NAME, (unsigned long)"gki timer", 0, 0, 0);
-
-    raise_priority_a2dp(TASK_HIGH_GKI_TIMER);
-
-    while(!shutdown_timer)
-    {
-        /* If the timer has been stopped (no SW timer running) */
-        if (*p_run_cond == GKI_TIMER_TICK_STOP_COND)
-        {
-            /*
-             * We will lock/wait on GKI_timer_mutex.
-             * This mutex will be unlocked when timer is re-started
-             */
-            GKI_TRACE("GKI_run lock mutex");
-            pthread_mutex_lock(&p_os->gki_timer_mutex);
-
-            /* We are here because the mutex has been released by timer cback */
-            /* Let's release it for future use */
-            GKI_TRACE("GKI_run unlock mutex");
-            pthread_mutex_unlock(&p_os->gki_timer_mutex);
-
-            /* Indicate that tick is just starting */
-            restart = 1;
-        }
-
-        /* Get time */
-        clock_gettime(CLOCK_MONOTONIC, &current);
-
-        /* Check if tick was just restarted, indicating to the compiler that this is
-         * unlikely to happen (to help branch prediction) */
-        if (__unlikely(restart))
-        {
-            /* Clear the restart indication */
-            restart = 0;
-
-            timeout_ns = (GKI_TICKS_TO_MS(1) * 1000000);
-        }
-        else
-        {
-            /* Compute time elapsed since last sleep start */
-            delta_ns = current.tv_nsec - previous.tv_nsec;
-            delta_ns += (current.tv_sec - previous.tv_sec) * 1000000000;
-
-            /* Compute next timeout:
-             *    timeout = (next theoretical expiration) - current time
-             *    timeout = (previous time + timeout + delay) - current time
-             *    timeout = timeout + delay - (current time - previous time)
-             *    timeout += delay - delta */
-            timeout_ns += (GKI_TICKS_TO_MS(1) * 1000000) - delta_ns;
-        }
-        /* Save the current time for next iteration */
-        previous = current;
-
-        timeout.tv_sec = 0;
-
-        /* Sleep until next theoretical tick time.  In case of excessive
-           elapsed time since last theoretical tick expiration, it is
-           possible that the timeout value is negative.  To protect
-           against this error, we set minimum sleep time to 10% of the
-           tick period.  We indicate to compiler that this is unlikely to
-           happen (to help branch prediction) */
-
-        if (__unlikely(timeout_ns < ((GKI_TICKS_TO_MS(1) * 1000000) * 0.1)))
-        {
-            timeout.tv_nsec = (GKI_TICKS_TO_MS(1) * 1000000) * 0.1;
-
-            /* Print error message if tick really got delayed
-               (more than 5 ticks) */
-            if (timeout_ns < GKI_TICKS_TO_MS(-5) * 1000000)
-            {
-                GKI_ERROR_LOG("tick delayed > 5 slots (%d,%d) -- cpu overload ? ",
-                        timeout_ns, GKI_TICKS_TO_MS(-5) * 1000000);
-            }
-        }
-        else
-        {
-            timeout.tv_nsec = timeout_ns;
-        }
-
-        do
-        {
-            /* [u]sleep can't be used because it uses SIGALRM */
-            err = nanosleep(&timeout, &timeout);
-        } while (err < 0 && errno == EINTR);
-
-        /* Increment the GKI time value by one tick and update internal timers */
-        GKI_timer_update(1);
-    }
-    GKI_TRACE("gki_ulinux: Exiting timer_thread");
-    pthread_exit(NULL);
-    return NULL;
-}
-#endif
-
 
 /*****************************************************************************
 **
@@ -753,26 +683,6 @@ static void gki_set_timer_scheduling( void )
 
 /*****************************************************************************
 **
-** Function        GKI_freeze
-**
-** Description     Freeze GKI. Relevant only when NO_GKI_RUN_RETURN is defined
-**
-** Returns
-**
-*******************************************************************************/
-
-void GKI_freeze()
-{
-#ifdef NO_GKI_RUN_RETURN
-   shutdown_timer = 1;
-   pthread_mutex_unlock( &gki_cb.os.gki_timer_mutex );
-   /* Ensure that the timer thread exits */
-   pthread_join(timer_thread_id, NULL);
-#endif
-}
-
-/*****************************************************************************
-**
 ** Function        GKI_run
 **
 ** Description     Main GKI loop
@@ -781,77 +691,11 @@ void GKI_freeze()
 **
 *******************************************************************************/
 
-void GKI_run (void *p_task_id)
+void GKI_run(void)
 {
-    struct timespec delay;
-    int err;
-    volatile int * p_run_cond = &gki_cb.os.no_timer_suspend;
-
-#ifndef GKI_NO_TICK_STOP
     /* adjust btld scheduling scheme now */
     gki_set_timer_scheduling();
-
-    /* register start stop function which disable timer loop in GKI_run() when no timers are
-     * in any GKI/BTA/BTU this should save power when BTLD is idle! */
-    GKI_timer_queue_register_callback( gki_system_tick_start_stop_cback );
     GKI_TRACE( "GKI_run(): Start/Stop GKI_timer_update_registered!" );
-#endif
-
-#ifdef NO_GKI_RUN_RETURN
-    pthread_attr_t timer_attr;
-
-    shutdown_timer = 0;
-
-    pthread_attr_init(&timer_attr);
-    if (pthread_create( &timer_thread_id,
-              &timer_attr,
-              timer_thread,
-              NULL) != 0 )
-    {
-        GKI_ERROR_LOG("pthread_create failed to create timer_thread!\n\r");
-        return;
-    }
-
-#else
-    GKI_TRACE("GKI_run ");
-    for (;;)
-    {
-        do
-        {
-            /* adjust hear bit tick in btld by changning TICKS_PER_SEC!!!!! this formula works only for
-             * 1-1000ms heart beat units! */
-            delay.tv_sec = LINUX_SEC / 1000;
-            delay.tv_nsec = 1000 * 1000 * (LINUX_SEC % 1000);
-
-            /* [u]sleep can't be used because it uses SIGALRM */
-            do
-            {
-                err = nanosleep(&delay, &delay);
-            } while (err < 0 && errno == EINTR);
-
-            /* the unit should be alsways 1 (1 tick). only if you vary for some reason heart beat tick
-             * e.g. power saving you may want to provide more ticks
-             */
-            GKI_timer_update( 1 );
-            /* BT_TRACE_2( TRACE_LAYER_HCI, TRACE_TYPE_DEBUG, "update: tv_sec: %d, tv_nsec: %d", delay.tv_sec, delay.tv_nsec ); */
-        } while ( GKI_TIMER_TICK_RUN_COND == *p_run_cond );
-
-        /* currently on reason to exit above loop is no_timer_suspend == GKI_TIMER_TICK_STOP_COND
-         * block timer main thread till re-armed by  */
-
-        GKI_TIMER_TRACE(">>> SUSPENDED GKI_timer_update()" );
-
-        pthread_mutex_lock( &gki_cb.os.gki_timer_mutex );
-        pthread_cond_wait( &gki_cb.os.gki_timer_cond, &gki_cb.os.gki_timer_mutex );
-        pthread_mutex_unlock( &gki_cb.os.gki_timer_mutex );
-
-        /* potentially we need to adjust os gki_cb.com.OSTicks */
-        GKI_TIMER_TRACE(">>> RESTARTED GKI_timer_update(): run_cond: %d",
-                    *p_run_cond );
-
-    }
-#endif
-    return;
 }
 
 
@@ -938,9 +782,8 @@ UINT16 GKI_wait (UINT16 flag, UINT32 timeout)
             }
             abstime.tv_sec += sec;
 
-            pthread_cond_timedwait_monotonic(&gki_cb.os.thread_evt_cond[rtask],
+            pthread_cond_timedwait(&gki_cb.os.thread_evt_cond[rtask],
                     &gki_cb.os.thread_evt_mutex[rtask], &abstime);
-
         }
         else
         {
@@ -1054,7 +897,6 @@ UINT8 GKI_send_event (UINT8 task_id, UINT16 event)
 {
     GKI_TRACE("GKI_send_event %d %x", task_id, event);
 
-    /* use efficient coding to avoid pipeline stalls */
     if (task_id < GKI_MAX_TASKS)
     {
         /* protect OSWaitEvt[task_id] from manipulation in GKI_wait() */
@@ -1072,33 +914,6 @@ UINT8 GKI_send_event (UINT8 task_id, UINT16 event)
     }
     GKI_TRACE("############## GKI_send_event FAILED!! ##################");
     return (GKI_FAILURE);
-}
-
-
-/*******************************************************************************
-**
-** Function         GKI_isend_event
-**
-** Description      This function is called from ISRs to send events to other
-**                  tasks. The only difference between this function and GKI_send_event
-**                  is that this function assumes interrupts are already disabled.
-**
-** Parameters:      task_id -  (input) The destination task Id for the event.
-**                  event   -  (input) The event flag
-**
-** Returns          GKI_SUCCESS if all OK, else GKI_FAILURE
-**
-** NOTE             This function is NOT called by the Broadcom stack and
-**                  profiles. If you want to use it in your own implementation,
-**                  put your code here, otherwise you can delete the entire
-**                  body of the function.
-**
-*******************************************************************************/
-UINT8 GKI_isend_event (UINT8 task_id, UINT16 event)
-{
-    GKI_TRACE("GKI_isend_event %d %x", task_id, event);
-    GKI_TRACE("GKI_isend_event %d %x done", task_id, event);
-    return    GKI_send_event(task_id, event);
 }
 
 
@@ -1186,10 +1001,7 @@ INT8 *GKI_map_taskname (UINT8 task_id)
 *******************************************************************************/
 void GKI_enable (void)
 {
-    //GKI_TRACE("GKI_enable");
     pthread_mutex_unlock(&gki_cb.os.GKI_mutex);
-    //GKI_TRACE("Leaving GKI_enable");
-    return;
 }
 
 
@@ -1205,12 +1017,7 @@ void GKI_enable (void)
 
 void GKI_disable (void)
 {
-    //GKI_TRACE("GKI_disable");
-
     pthread_mutex_lock(&gki_cb.os.GKI_mutex);
-
-    //GKI_TRACE("Leaving GKI_disable");
-    return;
 }
 
 
@@ -1233,20 +1040,20 @@ void GKI_exception (UINT16 code, char *msg)
     UINT8 task_id;
     int i = 0;
 
-    GKI_ERROR_LOG( "GKI_exception(): Task State Table\n");
+    ALOGE( "GKI_exception(): Task State Table");
 
     for(task_id = 0; task_id < GKI_MAX_TASKS; task_id++)
     {
-        GKI_ERROR_LOG( "TASK ID [%d] task name [%s] state [%d]\n",
+        ALOGE( "TASK ID [%d] task name [%s] state [%d]",
                          task_id,
                          gki_cb.com.OSTName[task_id],
                          gki_cb.com.OSRdyTbl[task_id]);
     }
 
-    GKI_ERROR_LOG("GKI_exception %d %s", code, msg);
-    GKI_ERROR_LOG( "\n********************************************************************\n");
-    GKI_ERROR_LOG( "* GKI_exception(): %d %s\n", code, msg);
-    GKI_ERROR_LOG( "********************************************************************\n");
+    ALOGE("GKI_exception %d %s", code, msg);
+    ALOGE( "********************************************************************");
+    ALOGE( "* GKI_exception(): %d %s", code, msg);
+    ALOGE( "********************************************************************");
 
 #if 0//(GKI_DEBUG == TRUE)
     GKI_disable();
@@ -1268,80 +1075,6 @@ void GKI_exception (UINT16 code, char *msg)
     return;
 }
 
-
-/*******************************************************************************
-**
-** Function         GKI_get_time_stamp
-**
-** Description      This function formats the time into a user area
-**
-** Parameters:      tbuf -  (output) the address to the memory containing the
-**                  formatted time
-**
-** Returns          the address of the user area containing the formatted time
-**                  The format of the time is ????
-**
-** NOTE             This function is only called by OBEX.
-**
-*******************************************************************************/
-INT8 *GKI_get_time_stamp (INT8 *tbuf)
-{
-    UINT32 ms_time;
-    UINT32 s_time;
-    UINT32 m_time;
-    UINT32 h_time;
-    INT8   *p_out = tbuf;
-
-    gki_cb.com.OSTicks = times(0);
-    ms_time = GKI_TICKS_TO_MS(gki_cb.com.OSTicks);
-    s_time  = ms_time/100;   /* 100 Ticks per second */
-    m_time  = s_time/60;
-    h_time  = m_time/60;
-
-    ms_time -= s_time*100;
-    s_time  -= m_time*60;
-    m_time  -= h_time*60;
-
-    *p_out++ = (INT8)((h_time / 10) + '0');
-    *p_out++ = (INT8)((h_time % 10) + '0');
-    *p_out++ = ':';
-    *p_out++ = (INT8)((m_time / 10) + '0');
-    *p_out++ = (INT8)((m_time % 10) + '0');
-    *p_out++ = ':';
-    *p_out++ = (INT8)((s_time / 10) + '0');
-    *p_out++ = (INT8)((s_time % 10) + '0');
-    *p_out++ = ':';
-    *p_out++ = (INT8)((ms_time / 10) + '0');
-    *p_out++ = (INT8)((ms_time % 10) + '0');
-    *p_out++ = ':';
-    *p_out   = 0;
-
-    return (tbuf);
-}
-
-
-/*******************************************************************************
-**
-** Function         GKI_register_mempool
-**
-** Description      This function registers a specific memory pool.
-**
-** Parameters:      p_mem -  (input) pointer to the memory pool
-**
-** Returns          void
-**
-** NOTE             This function is NOT called by the Broadcom stack and
-**                  profiles. If your OS has different memory pools, you
-**                  can tell GKI the pool to use by calling this function.
-**
-*******************************************************************************/
-void GKI_register_mempool (void *p_mem)
-{
-    gki_cb.com.p_user_mempool = p_mem;
-
-    return;
-}
-
 /*******************************************************************************
 **
 ** Function         GKI_os_malloc
@@ -1359,7 +1092,7 @@ void GKI_register_mempool (void *p_mem)
 *******************************************************************************/
 void *GKI_os_malloc (UINT32 size)
 {
-    return (malloc(size));
+    return malloc(size);
 }
 
 /*******************************************************************************
@@ -1379,61 +1112,7 @@ void *GKI_os_malloc (UINT32 size)
 *******************************************************************************/
 void GKI_os_free (void *p_mem)
 {
-    if(p_mem != NULL)
-        free(p_mem);
-    return;
-}
-
-
-/*******************************************************************************
-**
-** Function         GKI_suspend_task()
-**
-** Description      This function suspends the task specified in the argument.
-**
-** Parameters:      task_id  - (input) the id of the task that has to suspended
-**
-** Returns          GKI_SUCCESS if all OK, else GKI_FAILURE
-**
-** NOTE             This function is NOT called by the Broadcom stack and
-**                  profiles. If you want to implement task suspension capability,
-**                  put specific code here.
-**
-*******************************************************************************/
-UINT8 GKI_suspend_task (UINT8 task_id)
-{
-    GKI_TRACE("GKI_suspend_task %d - NOT implemented", task_id);
-
-
-    GKI_TRACE("GKI_suspend_task %d done", task_id);
-
-    return (GKI_SUCCESS);
-}
-
-
-/*******************************************************************************
-**
-** Function         GKI_resume_task()
-**
-** Description      This function resumes the task specified in the argument.
-**
-** Parameters:      task_id  - (input) the id of the task that has to resumed
-**
-** Returns          GKI_SUCCESS if all OK
-**
-** NOTE             This function is NOT called by the Broadcom stack and
-**                  profiles. If you want to implement task suspension capability,
-**                  put specific code here.
-**
-*******************************************************************************/
-UINT8 GKI_resume_task (UINT8 task_id)
-{
-    GKI_TRACE("GKI_resume_task %d - NOT implemented", task_id);
-
-
-    GKI_TRACE("GKI_resume_task %d done", task_id);
-
-    return (GKI_SUCCESS);
+    free(p_mem);
 }
 
 
@@ -1465,50 +1144,6 @@ void GKI_exit_task (UINT8 task_id)
 
     GKI_enable();
 
-    //GKI_send_event(task_id, EVENT_MASK(GKI_SHUTDOWN_EVT));
-
-    GKI_INFO("GKI_exit_task %d done", task_id);
+    ALOGI("GKI_exit_task %d done", task_id);
     return;
 }
-
-
-/*******************************************************************************
-**
-** Function         GKI_sched_lock
-**
-** Description      This function is called by tasks to disable scheduler
-**                  task context switching.
-**
-** Returns          void
-**
-** NOTE             This function is NOT called by the Broadcom stack and
-**                  profiles. If you want to use it in your own implementation,
-**                  put code here to tell the OS to disable context switching.
-**
-*******************************************************************************/
-void GKI_sched_lock(void)
-{
-    GKI_TRACE("GKI_sched_lock");
-    return;
-}
-
-
-/*******************************************************************************
-**
-** Function         GKI_sched_unlock
-**
-** Description      This function is called by tasks to enable scheduler switching.
-**
-** Returns          void
-**
-** NOTE             This function is NOT called by the Broadcom stack and
-**                  profiles. If you want to use it in your own implementation,
-**                  put code here to tell the OS to re-enable context switching.
-**
-*******************************************************************************/
-void GKI_sched_unlock(void)
-{
-    GKI_TRACE("GKI_sched_unlock");
-}
-
-

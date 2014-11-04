@@ -29,6 +29,7 @@
 
 #include "gki.h"
 #include "bt_types.h"
+#include "bt_utils.h"
 #include "btu.h"
 
 #include "l2cdefs.h"
@@ -96,6 +97,10 @@ static void process_service_search_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
 #define SDP_TEXT_BAD_CONT_INX   NULL
 #endif
 
+#ifndef SDP_TEXT_BAD_MAX_RECORDS_LIST
+#define SDP_TEXT_BAD_MAX_RECORDS_LIST   NULL
+#endif
+
 /*******************************************************************************
 **
 ** Function         sdp_server_handle_client_req
@@ -147,7 +152,7 @@ void sdp_server_handle_client_req (tCONN_CB *p_ccb, BT_HDR *p_msg)
 
     default:
         sdpu_build_n_send_error (p_ccb, trans_num, SDP_INVALID_REQ_SYNTAX, SDP_TEXT_BAD_PDU);
-        SDP_TRACE_WARNING1 ("SDP - server got unknown PDU: 0x%x", pdu_id);
+        SDP_TRACE_WARNING ("SDP - server got unknown PDU: 0x%x", pdu_id);
         break;
     }
 }
@@ -177,6 +182,7 @@ static void process_service_search (tCONN_CB *p_ccb, UINT16 trans_num,
     tSDP_RECORD    *p_rec = NULL;
     BT_HDR         *p_buf;
     BOOLEAN         is_cont = FALSE;
+    UNUSED(p_req_end);
 
     p_req = sdpu_extract_uid_seq (p_req, param_len, &uid_seq);
 
@@ -191,6 +197,14 @@ static void process_service_search (tCONN_CB *p_ccb, UINT16 trans_num,
 
     if (max_replies > SDP_MAX_RECORDS)
         max_replies = SDP_MAX_RECORDS;
+
+
+    if ((!p_req) || (p_req > p_req_end))
+    {
+        sdpu_build_n_send_error (p_ccb, trans_num, SDP_INVALID_REQ_SYNTAX, SDP_TEXT_BAD_MAX_RECORDS_LIST);
+        return;
+    }
+
 
     /* Get a list of handles that match the UUIDs given to us */
     for (num_rsp_handles = 0; num_rsp_handles < max_replies; )
@@ -243,7 +257,7 @@ static void process_service_search (tCONN_CB *p_ccb, UINT16 trans_num,
     /* Get a buffer to use to build the response */
     if ((p_buf = (BT_HDR *)GKI_getpoolbuf (SDP_POOL_ID)) == NULL)
     {
-        SDP_TRACE_ERROR0 ("SDP - no buf for search rsp");
+        SDP_TRACE_ERROR ("SDP - no buf for search rsp");
         return;
     }
     p_buf->offset = L2CAP_MIN_OFFSET;
@@ -261,7 +275,7 @@ static void process_service_search (tCONN_CB *p_ccb, UINT16 trans_num,
     UINT16_TO_BE_STREAM (p_rsp, num_rsp_handles);
     UINT16_TO_BE_STREAM (p_rsp, cur_handles);
 
-/*    SDP_TRACE_DEBUG5("SDP Service Rsp: tothdl %d, curhdlr %d, start %d, end %d, cont %d",
+/*    SDP_TRACE_DEBUG("SDP Service Rsp: tothdl %d, curhdlr %d, start %d, end %d, cont %d",
                      num_rsp_handles, cur_handles, cont_offset,
                      cont_offset + cur_handles-1, is_cont); */
     for (xx = cont_offset; xx < cont_offset + cur_handles; xx++)
@@ -378,12 +392,18 @@ static void process_service_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
     else
     {
         /* Get a scratch buffer to store response */
-        if (!p_ccb->rsp_list)
+        if (!p_ccb->rsp_list || (GKI_get_buf_size(p_ccb->rsp_list) < max_list_len))
         {
+            /* Free and reallocate if the earlier allocated buffer is small */
+            if (p_ccb->rsp_list)
+            {
+                GKI_freebuf (p_ccb->rsp_list);
+            }
+
             p_ccb->rsp_list = (UINT8 *)GKI_getbuf (max_list_len);
             if (p_ccb->rsp_list == NULL)
             {
-                SDP_TRACE_ERROR0 ("SDP - no scratch buf for search rsp");
+                SDP_TRACE_ERROR ("SDP - no scratch buf for search rsp");
                 return;
             }
         }
@@ -432,7 +452,7 @@ static void process_service_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
             {
                 if (attr_len >= SDP_MAX_ATTR_LEN)
                 {
-                    SDP_TRACE_ERROR2("SDP attr too big: max_list_len=%d,attr_len=%d", max_list_len, attr_len);
+                    SDP_TRACE_ERROR("SDP attr too big: max_list_len=%d,attr_len=%d", max_list_len, attr_len);
                     sdpu_build_n_send_error (p_ccb, trans_num, SDP_NO_RESOURCES, NULL);
                     return;
                 }
@@ -491,7 +511,7 @@ static void process_service_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
     /* Get a buffer to use to build the response */
     if ((p_buf = (BT_HDR *)GKI_getpoolbuf (SDP_POOL_ID)) == NULL)
     {
-        SDP_TRACE_ERROR0 ("SDP - no buf for search rsp");
+        SDP_TRACE_ERROR ("SDP - no buf for search rsp");
         return;
     }
     p_buf->offset = L2CAP_MIN_OFFSET;
@@ -565,6 +585,7 @@ static void process_service_search_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
     BOOLEAN         maxxed_out = FALSE, is_cont = FALSE;
     UINT8           *p_seq_start;
     UINT16          seq_len, attr_len;
+    UNUSED(p_req_end);
 
     /* Extract the UUID sequence to search for */
     p_req = sdpu_extract_uid_seq (p_req, param_len, &uid_seq);
@@ -621,12 +642,18 @@ static void process_service_search_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
     else
     {
         /* Get a scratch buffer to store response */
-        if (!p_ccb->rsp_list)
+        if (!p_ccb->rsp_list || (GKI_get_buf_size(p_ccb->rsp_list) < max_list_len))
         {
+            /* Free and reallocate if the earlier allocated buffer is small */
+            if (p_ccb->rsp_list)
+            {
+                GKI_freebuf (p_ccb->rsp_list);
+            }
+
             p_ccb->rsp_list = (UINT8 *)GKI_getbuf (max_list_len);
             if (p_ccb->rsp_list == NULL)
             {
-                SDP_TRACE_ERROR0 ("SDP - no scratch buf for search rsp");
+                SDP_TRACE_ERROR ("SDP - no scratch buf for search rsp");
                 return;
             }
         }
@@ -699,7 +726,7 @@ static void process_service_search_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
                 {
                     if (attr_len >= SDP_MAX_ATTR_LEN)
                     {
-                        SDP_TRACE_ERROR2("SDP attr too big: max_list_len=%d,attr_len=%d", max_list_len, attr_len);
+                        SDP_TRACE_ERROR("SDP attr too big: max_list_len=%d,attr_len=%d", max_list_len, attr_len);
                         sdpu_build_n_send_error (p_ccb, trans_num, SDP_NO_RESOURCES, NULL);
                         return;
                     }
@@ -786,7 +813,7 @@ static void process_service_search_attr_req (tCONN_CB *p_ccb, UINT16 trans_num,
     /* Get a buffer to use to build the response */
     if ((p_buf = (BT_HDR *)GKI_getpoolbuf (SDP_POOL_ID)) == NULL)
     {
-        SDP_TRACE_ERROR0 ("SDP - no buf for search rsp");
+        SDP_TRACE_ERROR ("SDP - no buf for search rsp");
         return;
     }
     p_buf->offset = L2CAP_MIN_OFFSET;

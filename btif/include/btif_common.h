@@ -1,5 +1,6 @@
 /******************************************************************************
  *
+ *  Copyright (c) 2014 The Android Open Source Project
  *  Copyright (C) 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -49,12 +50,13 @@
 #define BTIF_HFP            2
 #define BTIF_AV             3
 #define BTIF_PAN            4
+#define BTIF_HF_CLIENT      5
 
 extern bt_callbacks_t *bt_hal_cbacks;
 
 #define HAL_CBACK(P_CB, P_CBACK, ...)\
     if (P_CB && P_CB->P_CBACK) {            \
-        BTIF_TRACE_API2("HAL %s->%s", #P_CB, #P_CBACK); \
+        BTIF_TRACE_API("HAL %s->%s", #P_CB, #P_CBACK); \
         P_CB->P_CBACK(__VA_ARGS__);         \
     }                                       \
     else {                                  \
@@ -116,6 +118,9 @@ enum
 
     BTIF_PAN_CB_START = BTIF_SIG_CB_START(BTIF_PAN),
     BTIF_PAN_CB_DISCONNECTING, /* PAN Disconnect has been sent to BTA successfully */
+
+    BTIF_HF_CLIENT_CLIENT_CB_START  = BTIF_SIG_CB_START(BTIF_HF_CLIENT),
+    BTIF_HF_CLIENT_CB_AUDIO_CONNECTING, /* AUDIO connect has been sent to BTA successfully */
 };
 
 /* Macro definitions for BD ADDR persistence */

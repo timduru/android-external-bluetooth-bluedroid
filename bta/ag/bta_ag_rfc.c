@@ -34,6 +34,7 @@
 #include "rfcdefs.h"
 #include "gki.h"
 #include "bd.h"
+#include "utl.h"
 
 /* Event mask for RfCOMM port callback */
 #define BTA_AG_PORT_EV_MASK         PORT_EV_RXCHAR
@@ -89,13 +90,14 @@ static void bta_ag_port_cback(UINT32 code, UINT16 port_handle, UINT16 handle)
 {
     BT_HDR      *p_buf;
     tBTA_AG_SCB *p_scb;
+    UNUSED(code);
 
     if ((p_scb = bta_ag_scb_by_idx(handle)) != NULL)
     {
         /* ignore port events for port handles other than connected handle */
         if (port_handle != p_scb->conn_handle)
         {
-            APPL_TRACE_DEBUG3("ag_port_cback ignoring handle:%d conn_handle = %d other handle = %d",
+            APPL_TRACE_DEBUG("ag_port_cback ignoring handle:%d conn_handle = %d other handle = %d",
                               port_handle, p_scb->conn_handle, handle);
             return;
         }
@@ -127,7 +129,7 @@ static void bta_ag_mgmt_cback(UINT32 code, UINT16 port_handle, UINT16 handle)
     UINT8           i;
     BOOLEAN         found_handle = FALSE;
 
-    APPL_TRACE_DEBUG3("ag_mgmt_cback : code = %d, port_handle = %d, handle = %d",
+    APPL_TRACE_DEBUG("ag_mgmt_cback : code = %d, port_handle = %d, handle = %d",
                         code, port_handle, handle);
 
     if ((p_scb = bta_ag_scb_by_idx(handle)) != NULL)
@@ -135,7 +137,7 @@ static void bta_ag_mgmt_cback(UINT32 code, UINT16 port_handle, UINT16 handle)
         /* ignore close event for port handles other than connected handle */
         if ((code != PORT_SUCCESS) && (port_handle != p_scb->conn_handle))
         {
-            APPL_TRACE_DEBUG1("ag_mgmt_cback ignoring handle:%d", port_handle);
+            APPL_TRACE_DEBUG("ag_mgmt_cback ignoring handle:%d", port_handle);
             return;
         }
 
@@ -157,7 +159,7 @@ static void bta_ag_mgmt_cback(UINT32 code, UINT16 port_handle, UINT16 handle)
 
             if (!found_handle)
             {
-                APPL_TRACE_ERROR1 ("bta_ag_mgmt_cback: PORT_SUCCESS, ignoring handle = %d", port_handle);
+                APPL_TRACE_ERROR ("bta_ag_mgmt_cback: PORT_SUCCESS, ignoring handle = %d", port_handle);
                 return;
             }
 
@@ -195,6 +197,8 @@ static void bta_ag_mgmt_cback(UINT32 code, UINT16 port_handle, UINT16 handle)
 *******************************************************************************/
 static int bta_ag_data_cback(UINT16 port_handle, void *p_data, UINT16 len, UINT16 handle)
 {
+    UNUSED(port_handle);
+
     /* call data call-out directly */
     bta_ag_co_tx_write(handle, (UINT8 *) p_data, len);
     return 0;
@@ -302,7 +306,7 @@ void bta_ag_start_servers(tBTA_AG_SCB *p_scb, tBTA_SERVICE_MASK services)
             else
             {
                 /* TODO: CR#137125 to handle to error properly */
-                APPL_TRACE_DEBUG1("bta_ag_start_servers: RFCOMM_CreateConnection returned error:%d", bta_ag_port_status);
+                APPL_TRACE_DEBUG("bta_ag_start_servers: RFCOMM_CreateConnection returned error:%d", bta_ag_port_status);
             }
         }
     }
@@ -378,7 +382,7 @@ void bta_ag_rfc_do_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
             bta_ag_mgmt_cback_tbl[bta_ag_scb_to_idx(p_scb) - 1]) == PORT_SUCCESS)
     {
         bta_ag_setup_port(p_scb, p_scb->conn_handle);
-        APPL_TRACE_DEBUG1("bta_ag_rfc_do_open : conn_handle = %d", p_scb->conn_handle);
+        APPL_TRACE_DEBUG("bta_ag_rfc_do_open : conn_handle = %d", p_scb->conn_handle);
     }
     /* RFCOMM create connection failed; send ourselves RFCOMM close event */
     else
@@ -400,6 +404,7 @@ void bta_ag_rfc_do_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 void bta_ag_rfc_do_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
     tBTA_AG_RFC     *p_buf;
+    UNUSED(p_data);
 
     if (p_scb->conn_handle)
     {

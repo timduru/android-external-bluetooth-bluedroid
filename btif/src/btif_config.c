@@ -49,6 +49,7 @@
 #include "btif_config_util.h"
 #include "btif_sock_thread.h"
 #include "btif_sock_util.h"
+#include "btif_util.h"
 
 //#define UNIT_TEST
 #define CFG_PATH "/data/misc/bluedroid/"
@@ -88,11 +89,10 @@ static pthread_mutex_t slot_lock;
 static int pth = -1; //poll thread handle
 static cfg_node root;
 static int cached_change;
-static int processing_save_cmd;
+static int save_cmds_queued;
 static void cfg_cmd_callback(int cmd_fd, int type, int flags, uint32_t user_id);
 static inline short alloc_node(cfg_node* p, short grow);
 static inline void free_node(cfg_node* p);
-static inline void free_inode(cfg_node* p, int child);
 static inline short find_inode(const cfg_node* p, const char* name);
 static cfg_node* find_node(const char* section, const char* key, const char* name);
 static int remove_node(const char* section, const char* key, const char* name);
@@ -103,7 +103,6 @@ static int set_node(const char* section, const char* key, const char* name,
 static int save_cfg();
 static void load_cfg();
 static short find_next_node(const cfg_node* p, short start, char* name, int* bytes);
-static int create_dir(const char* path);
 #ifdef UNIT_TEST
 static void cfg_test_load();
 static void cfg_test_write();
@@ -338,11 +337,22 @@ int btif_config_enum(btif_config_enum_callback cb, void* user_data)
 }
 int btif_config_save()
 {
+    int post_cmd = 0;
     lock_slot(&slot_lock);
-    bdld("processing_save_cmd:%d, cached change:%d", processing_save_cmd, cached_change);
-    if(!processing_save_cmd && cached_change > 0)
-        btsock_thread_post_cmd(pth, CFG_CMD_SAVE, NULL, 0, 0);
+    bdld("save_cmds_queued:%d, cached_change:%d", save_cmds_queued, cached_change);
+    if((save_cmds_queued == 0) && (cached_change > 0))
+    {
+        post_cmd = 1;
+        save_cmds_queued++;
+        bdld("post_cmd set to 1, save_cmds_queued:%d", save_cmds_queued);
+    }
     unlock_slot(&slot_lock);
+    /* don't hold lock when invoking send or else a deadlock could
+     * occur when the socket thread tries to do the actual saving.
+     */
+    if (post_cmd)
+        btsock_thread_post_cmd(pth, CFG_CMD_SAVE, NULL, 0, 0);
+
     return TRUE;
 }
 void btif_config_flush()
@@ -435,7 +445,7 @@ static cfg_node* find_add_node(cfg_node* p, const char* name)
         } else ADD_CHILD_COUNT(p, 1);
     }
     else node = &p->child[i];
-    if(!node->name)
+    if(node && (!node->name))
         node->name = strdup(name);
     return node;
 }
@@ -690,7 +700,6 @@ static int save_cfg()
    if(btif_config_save_file(file_name_new))
     {
         cached_change = 0;
-        processing_save_cmd = 0;
         chown(file_name_new, -1, AID_NET_BT_STACK);
         chmod(file_name_new, 0660);
         rename(file_name, file_name_old);
@@ -781,25 +790,38 @@ static void load_cfg()
 }
 static void cfg_cmd_callback(int cmd_fd, int type, int size, uint32_t user_id)
 {
-  //bdld("cmd type:%d, size:%d", type, size);
+    UNUSED(cmd_fd);
+    UNUSED(size);
+    UNUSED(user_id);
+
     switch(type)
     {
         case CFG_CMD_SAVE:
         {
-            int last_cached_change = cached_change;
-            processing_save_cmd = 1;
+            int i;
+            int last_cached_change;
+
+            // grab lock while accessing cached_change.
+            lock_slot(&slot_lock);
+            bdla(save_cmds_queued > 0);
+            save_cmds_queued--;
+            last_cached_change = cached_change;
             //hold the file saving until no more change in last 3 seconds.
             bdld("wait until no more changes in short time, cached change:%d", cached_change);
-            int i;
-            for(i = 0; i < 100; i ++) //5 minitue max waiting
+            for(i = 0; i < 100; i ++) //5 minutes max waiting
             {
+                // don't sleep if there is nothing to do
+                if(cached_change == 0)
+                    break;
+                // release lock during sleep
+                unlock_slot(&slot_lock);
                 sleep(3);
-                if(cached_change == 0 || last_cached_change == cached_change)
+                lock_slot(&slot_lock);
+                if(last_cached_change == cached_change)
                     break;
                 last_cached_change = cached_change;
             }
             bdld("writing the bt_config.xml now, cached change:%d", cached_change);
-            lock_slot(&slot_lock);
             if(cached_change > 0)
                 save_cfg();
             unlock_slot(&slot_lock);

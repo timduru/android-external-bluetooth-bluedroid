@@ -237,7 +237,8 @@ bt_status_t btif_storage_add_hid_device_info(bt_bdaddr_t *remote_bd_addr,
                                                     UINT16 attr_mask, UINT8 sub_class,
                                                     UINT8 app_id, UINT16 vendor_id,
                                                     UINT16 product_id, UINT16 version,
-                                                    UINT8 ctry_code, UINT16 dl_len, UINT8 *dsc_list);
+                                                    UINT8 ctry_code, UINT16 ssr_max_latency,
+                                                    UINT16 ssr_min_tout, UINT16 dl_len, UINT8 *dsc_list);
 
 /*******************************************************************************
 **
@@ -352,4 +353,34 @@ bt_status_t btif_storage_set_remote_addr_type(bt_bdaddr_t *remote_bd_addr,
 
 bt_status_t btif_storage_get_remote_version(const bt_bdaddr_t *remote_bd_addr,
                                   bt_remote_version_t *p_ver);
+
+/*******************************************************************************
+**
+** Function         btif_storage_set_dmt_support_type
+**
+** Description      Sets DMT support status for a remote device
+**
+** Returns          BT_STATUS_SUCCESS if config update is successful
+**                  BT_STATUS_FAIL otherwise
+**
+*******************************************************************************/
+
+bt_status_t btif_storage_set_dmt_support_type(const bt_bdaddr_t *remote_bd_addr,
+                                                   BOOLEAN dmt_supported);
+
+
+
+/*******************************************************************************
+**
+** Function         btif_storage_is_dmt_supported_device
+**
+** Description      checks if a device supports Dual mode topology
+**
+** Returns         TRUE if remote supports DMT else FALSE
+**
+*******************************************************************************/
+
+BOOLEAN btif_storage_is_dmt_supported_device(const bt_bdaddr_t *remote_bd_addr);
+
+
 #endif /* BTIF_STORAGE_H */

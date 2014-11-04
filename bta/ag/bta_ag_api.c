@@ -65,15 +65,13 @@ tBTA_STATUS BTA_AgEnable(tBTA_AG_PARSE_MODE parse_mode, tBTA_AG_CBACK *p_cback)
     {
         if (bta_ag_cb.scb[idx].in_use)
         {
-            APPL_TRACE_ERROR0 ("BTA_AgEnable: FAILED, AG already enabled.");
+            APPL_TRACE_ERROR ("BTA_AgEnable: FAILED, AG already enabled.");
             return BTA_FAILURE;
         }
     }
 
     /* register with BTA system manager */
-    GKI_sched_lock();
     bta_sys_register(BTA_ID_AG, &bta_ag_reg);
-    GKI_sched_unlock();
 
     if ((p_buf = (tBTA_AG_API_ENABLE *) GKI_getbuf(sizeof(tBTA_AG_API_ENABLE))) != NULL)
     {

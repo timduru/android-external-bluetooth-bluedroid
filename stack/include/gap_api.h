@@ -146,11 +146,6 @@
 #define  GAP_PREFER_CONN_SP_TOUT         2000
 #endif
 
-#if BLE_INCLUDED == TRUE
-#ifndef GAP_TRANSPORT_SUPPORTED
-#define GAP_TRANSPORT_SUPPORTED GATT_TRANSPORT_LE_BR_EDR
-#endif
-#endif
 /*****************************************************************************
 **  Type Definitions
 *****************************************************************************/
@@ -445,10 +440,16 @@ GAP_API extern UINT16 GAP_SetPairableMode (UINT16 mode, BOOLEAN connect_only_pai
 **
 ** Description      This function is called to initiate bonding with peer device
 **
+** Parameters:      bd_addr      - Address of the device to bond
+**                  pin_len      - length in bytes of the PIN Code
+**                  p_pin        - pointer to array with the PIN Code
+**                  trusted_mask - bitwise OR of trusted services (array of UINT32)
+**
 ** Returns          tBTM_STATUS - BTM_CMD_STARTED of successfully initiated
 **
 *******************************************************************************/
-GAP_API extern UINT8 GAP_Bond (BD_ADDR bd_addr, UINT8 pin_len, UINT8 *p_pin, UINT32 trusted_mask[]);
+GAP_API extern UINT8 GAP_Bond (BD_ADDR bd_addr, UINT8 pin_len,
+                               UINT8 *p_pin, UINT32 trusted_mask[]);
 
 /*******************************************************************************
 **

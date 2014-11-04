@@ -29,6 +29,7 @@
 #include <hardware/bt_sock.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <stdlib.h>
 #include <errno.h>
 
 #define LOG_TAG "BTIF_SOCK_SDP"
@@ -114,7 +115,7 @@ static int add_sdp_by_uuid(const char *name,  const uint8_t *service_uuid, UINT1
             }
         }
     }
-    else APPL_TRACE_ERROR1("failed to create sdp record, service_name:%s", name);
+    else APPL_TRACE_ERROR("failed to create sdp record, service_name:%s", name);
     return 0;
 }
 
@@ -143,11 +144,11 @@ static int add_pbap_sdp(const char* p_service_name, int scn)
     UINT32              sdp_handle = 0;
     tBTA_PBS_CFG *p_bta_pbs_cfg = (tBTA_PBS_CFG *)&bta_pbs_cfg;
 
-    APPL_TRACE_DEBUG2("add_pbap_sdd:scn %d, service name %s", scn, p_service_name);
+    APPL_TRACE_DEBUG("add_pbap_sdd:scn %d, service name %s", scn, p_service_name);
 
     if ((sdp_handle = SDP_CreateRecord()) == 0)
     {
-        APPL_TRACE_ERROR0("PBS SDP: Unable to register PBS Service");
+        APPL_TRACE_ERROR("PBS SDP: Unable to register PBS Service");
         return sdp_handle;
     }
 
@@ -198,12 +199,12 @@ static int add_pbap_sdp(const char* p_service_name, int scn)
     {
         SDP_DeleteRecord(sdp_handle);
         sdp_handle = 0;
-        APPL_TRACE_ERROR0("bta_pbs_sdp_register FAILED");
+        APPL_TRACE_ERROR("bta_pbs_sdp_register FAILED");
     }
     else
     {
         bta_sys_add_uuid(pbs_service);  /* UUID_SERVCLASS_PBAP_PSE */
-        APPL_TRACE_DEBUG1("PBS:  SDP Registered (handle 0x%08x)", sdp_handle);
+        APPL_TRACE_DEBUG("PBS:  SDP Registered (handle 0x%08x)", sdp_handle);
     }
 
     return sdp_handle;
@@ -213,10 +214,6 @@ static int add_pbap_sdp(const char* p_service_name, int scn)
  * a channel number to a hard coded SDP entry.
  * TODO: expose a prober SDP API, to avoid hacks like this, and make it possible
  *        to set useful names for the ServiceName */
-#define BTA_MAP_MSG_TYPE_EMAIL    0x01
-#define BTA_MAP_MSG_TYPE_SMS_GSM  0x02
-#define BTA_MAP_MSG_TYPE_SMS_CDMA 0x04
-#define BTA_MAP_MSG_TYPE_MMS      0x08
 
 #define BTA_MAPS_DEFAULT_VERSION 0x0101 /* MAP 1.1 */
 typedef struct
@@ -225,18 +222,7 @@ typedef struct
     const char* service_name;          /* Description of the MAS instance */
     UINT8       supported_message_types;/* Server supported message types - SMS/MMS/EMAIL */
 } tBTA_MAPS_CFG;
-const tBTA_MAPS_CFG bta_maps_cfg_sms =
-{
-    0,                  /* Mas id 0 is for SMS/MMS */
-    "MAP SMS",
-    BTA_MAP_MSG_TYPE_SMS_GSM | BTA_MAP_MSG_TYPE_SMS_CDMA
-};
-const tBTA_MAPS_CFG bta_maps_cfg_email =
-{
-    1,                  /* Mas id 1 is for EMAIL */
-    "MAP EMAIL",
-    BTA_MAP_MSG_TYPE_EMAIL
-};
+
 static int add_maps_sdp(const char* p_service_name, int scn)
 {
 
@@ -245,14 +231,35 @@ static int add_maps_sdp(const char* p_service_name, int scn)
     UINT16              browse = UUID_SERVCLASS_PUBLIC_BROWSE_GROUP;
     BOOLEAN             status = FALSE;
     UINT32              sdp_handle = 0;
-    // TODO: To add support for EMAIL set below depending on the scn to either SMS or Email
-    const tBTA_MAPS_CFG *p_bta_maps_cfg = &bta_maps_cfg_sms;
+    char                map_handle_buf[3];
+    char                map_type_buf[3];
+    char                *map_name = (char*)&(p_service_name[4]);
+    tBTA_MAPS_CFG       bta_maps_cfg;
+    tBTA_MAPS_CFG       *p_bta_maps_cfg;
+    APPL_TRACE_DEBUG("add_maps_sdp: scn %d, service name %s", scn, p_service_name);
 
-    APPL_TRACE_DEBUG2("add_maps_sdd:scn %d, service name %s", scn, p_service_name);
+    /* Service name for map is build as XX|YY|name where XX and YY is
+     * MasId and Type flag as 2byte hex as string */
+    map_handle_buf[0] = p_service_name[0];
+    map_handle_buf[1] = p_service_name[1];
+    map_handle_buf[2] = '\0';
+
+    map_type_buf[0]   = p_service_name[2];
+    map_type_buf[1]   = p_service_name[3];
+    map_type_buf[2]   = '\0';
+
+    p_bta_maps_cfg = &bta_maps_cfg;
+    p_bta_maps_cfg->mas_id = (UINT16)strtol(&map_handle_buf[0],NULL, 16);
+    p_bta_maps_cfg->supported_message_types = (UINT16)strtol(&map_type_buf[0],NULL, 16);
+    p_bta_maps_cfg->service_name = map_name;
+
+    APPL_TRACE_DEBUG("  service_name: %s, mas-id: %d, flags: 0x%02x",
+            p_bta_maps_cfg->service_name, p_bta_maps_cfg->mas_id,
+            p_bta_maps_cfg->supported_message_types);
 
     if ((sdp_handle = SDP_CreateRecord()) == 0)
     {
-        APPL_TRACE_ERROR0("MAPS SDP: Unable to register MAPS Service");
+        APPL_TRACE_ERROR("MAPS SDP: Unable to register MAPS Service");
         return sdp_handle;
     }
 
@@ -304,12 +311,12 @@ static int add_maps_sdp(const char* p_service_name, int scn)
     {
         SDP_DeleteRecord(sdp_handle);
         sdp_handle = 0;
-        APPL_TRACE_ERROR0("bta_mass_sdp_register FAILED");
+        APPL_TRACE_ERROR("bta_mass_sdp_register FAILED");
     }
     else
     {
         bta_sys_add_uuid(service);  /* UUID_SERVCLASS_MESSAGE_ACCESS */
-        APPL_TRACE_DEBUG1("MAPSS:  SDP Registered (handle 0x%08x)", sdp_handle);
+        APPL_TRACE_DEBUG("MAPSS:  SDP Registered (handle 0x%08x)", sdp_handle);
     }
 
     return sdp_handle;
@@ -353,7 +360,7 @@ static int add_ops_sdp(const char *p_service_name,int scn)
     UINT32 sdp_handle;
     tBTA_OP_FMT_MASK    formats = BTUI_OPS_FORMATS;
 
-    APPL_TRACE_DEBUG2("scn %d, service name %s", scn, p_service_name);
+    APPL_TRACE_DEBUG("scn %d, service name %s", scn, p_service_name);
 
     sdp_handle = SDP_CreateRecord();
 
@@ -416,7 +423,7 @@ static int add_spp_sdp(const char *service_name, int scn)
     tSDP_PROTOCOL_ELEM  proto_elem_list[SPP_NUM_PROTO_ELEMS];
     int              sdp_handle;
 
-    APPL_TRACE_DEBUG2("scn %d, service name %s", scn, service_name);
+    APPL_TRACE_DEBUG("scn %d, service name %s", scn, service_name);
 
     /* register the service */
     if ((sdp_handle = SDP_CreateRecord()) != FALSE)
@@ -450,12 +457,11 @@ static int add_spp_sdp(const char *service_name, int scn)
 }
 
 
-
 static int add_rfc_sdp_by_uuid(const char* name, const uint8_t* uuid, int scn)
 {
     int handle = 0;
 
-    APPL_TRACE_DEBUG2("name:%s, scn:%d", name, scn);
+    APPL_TRACE_DEBUG("name:%s, scn:%d", name, scn);
 
     /*
         Bluetooth Socket API relies on having preregistered bluez sdp records for HSAG, HFAG, OPP & PBAP
@@ -546,7 +552,7 @@ int add_rfc_sdp_rec(const char* name, const uint8_t* uuid, int scn)
 
 void del_rfc_sdp_rec(int handle)
 {
-    APPL_TRACE_DEBUG1("del_rfc_sdp_rec: handle:0x%x", handle);
+    APPL_TRACE_DEBUG("del_rfc_sdp_rec: handle:0x%x", handle);
     if(handle != -1 && handle != 0)
         BTA_JvDeleteRecord( handle );
 }

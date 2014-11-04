@@ -31,6 +31,7 @@
 #include "bta_ag_int.h"
 #include "btm_api.h"
 #include "gki.h"
+#include "utl.h"
 
 #ifndef BTA_AG_SCO_DEBUG
 #define BTA_AG_SCO_DEBUG FALSE
@@ -68,7 +69,11 @@ enum
 };
 
 #if (BTM_WBS_INCLUDED == TRUE )
-#define BTA_AG_NUM_CODECS   2
+#define BTA_AG_NUM_CODECS   3
+#define BTA_AG_ESCO_SETTING_IDX_CVSD    0   /* eSCO setting for CVSD */
+#define BTA_AG_ESCO_SETTING_IDX_T1      1   /* eSCO setting for mSBC T1 */
+#define BTA_AG_ESCO_SETTING_IDX_T2      2   /* eSCO setting for mSBC T2 */
+
 static const tBTM_ESCO_PARAMS bta_ag_esco_params[BTA_AG_NUM_CODECS] =
 {
     /* CVSD */
@@ -87,7 +92,20 @@ static const tBTM_ESCO_PARAMS bta_ag_esco_params[BTA_AG_NUM_CODECS] =
         BTM_SCO_PKT_TYPES_MASK_NO_3_EV5),
         BTM_ESCO_RETRANS_POWER       /* Retransmission effort                      */
     },
-    /* mSBC */
+    /* mSBC  T1 */
+    {
+        BTM_64KBITS_RATE,                   /* TX Bandwidth (64 kbits/sec), 8000        */
+        BTM_64KBITS_RATE,                   /* RX Bandwidth (64 kbits/sec), 8000        */
+        8,                                  /* 8 ms                                     */
+        BTM_VOICE_SETTING_TRANS,            /* Inp Linear, Transparent, 2s Comp, 16bit  */
+       (BTM_SCO_PKT_TYPES_MASK_EV3      |   /* Packet Types : EV3 + NO_2_EV3            */
+        BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 |
+        BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 |
+        BTM_SCO_PKT_TYPES_MASK_NO_3_EV5 |
+        BTM_SCO_PKT_TYPES_MASK_NO_2_EV3 ),
+        BTM_ESCO_RETRANS_QUALITY       /* Retransmission effort                      */
+    },
+    /* mSBC T2*/
     {
         BTM_64KBITS_RATE,                   /* TX Bandwidth (64 kbits/sec), 8000        */
         BTM_64KBITS_RATE,                   /* RX Bandwidth (64 kbits/sec), 8000        */
@@ -101,6 +119,7 @@ static const tBTM_ESCO_PARAMS bta_ag_esco_params[BTA_AG_NUM_CODECS] =
     }
 };
 #else
+/* WBS not included, CVSD by default */
 static const tBTM_ESCO_PARAMS bta_ag_esco_params =
 {
     BTM_64KBITS_RATE,                   /* TX Bandwidth (64 kbits/sec)              */
@@ -183,11 +202,11 @@ static void bta_ag_sco_disc_cback(UINT16 sco_idx)
     BT_HDR  *p_buf;
     UINT16  handle = 0;
 
-    APPL_TRACE_DEBUG3 ("bta_ag_sco_disc_cback(): sco_idx: 0x%x  p_cur_scb: 0x%08x  sco.state: %d", sco_idx, bta_ag_cb.sco.p_curr_scb, bta_ag_cb.sco.state);
+    APPL_TRACE_DEBUG ("bta_ag_sco_disc_cback(): sco_idx: 0x%x  p_cur_scb: 0x%08x  sco.state: %d", sco_idx, bta_ag_cb.sco.p_curr_scb, bta_ag_cb.sco.state);
 
-    APPL_TRACE_DEBUG4 ("bta_ag_sco_disc_cback(): scb[0] addr: 0x%08x  in_use: %u  sco_idx: 0x%x  sco state: %u",
+    APPL_TRACE_DEBUG ("bta_ag_sco_disc_cback(): scb[0] addr: 0x%08x  in_use: %u  sco_idx: 0x%x  sco state: %u",
                        &bta_ag_cb.scb[0], bta_ag_cb.scb[0].in_use, bta_ag_cb.scb[0].sco_idx, bta_ag_cb.scb[0].state);
-    APPL_TRACE_DEBUG4 ("bta_ag_sco_disc_cback(): scb[1] addr: 0x%08x  in_use: %u  sco_idx: 0x%x  sco state: %u",
+    APPL_TRACE_DEBUG ("bta_ag_sco_disc_cback(): scb[1] addr: 0x%08x  in_use: %u  sco_idx: 0x%x  sco state: %u",
                        &bta_ag_cb.scb[1], bta_ag_cb.scb[1].in_use, bta_ag_cb.scb[1].sco_idx, bta_ag_cb.scb[1].state);
 
     /* match callback to scb */
@@ -206,8 +225,8 @@ static void bta_ag_sco_disc_cback(UINT16 sco_idx)
     {
 #if (BTM_SCO_HCI_INCLUDED == TRUE )
         tBTM_STATUS status = BTM_ConfigScoPath(BTM_SCO_ROUTE_PCM, NULL, NULL, TRUE);
-        APPL_TRACE_DEBUG1("bta_ag_sco_disc_cback sco close config status = %d", status);
-	    /* SCO clean up here */
+        APPL_TRACE_DEBUG("bta_ag_sco_disc_cback sco close config status = %d", status);
+        /* SCO clean up here */
         bta_dm_sco_co_close();
 #endif
 
@@ -215,14 +234,23 @@ static void bta_ag_sco_disc_cback(UINT16 sco_idx)
         /* Restore settings */
         if(bta_ag_cb.sco.p_curr_scb->inuse_codec == BTA_AG_CODEC_MSBC)
         {
-            BTM_SetWBSCodec (BTM_SCO_CODEC_NONE);
+            /* set_sco_codec(BTM_SCO_CODEC_NONE); we should get a close */
             BTM_WriteVoiceSettings (BTM_VOICE_SETTING_CVSD);
 
-            /* If SCO open was initiated by AG and failed for mSBC, try CVSD again. */
+            /* If SCO open was initiated by AG and failed for mSBC, then attempt
+            mSBC with T1 settings i.e. 'Safe Settings'. If this fails, then switch to CVSD */
             if (bta_ag_sco_is_opening (bta_ag_cb.sco.p_curr_scb))
             {
-                bta_ag_cb.sco.p_curr_scb->codec_fallback = TRUE;
-                APPL_TRACE_DEBUG0("Fallback to CVSD");
+                if (bta_ag_cb.sco.p_curr_scb->codec_msbc_settings == BTA_AG_SCO_MSBC_SETTINGS_T2)
+                {
+                     APPL_TRACE_DEBUG("Fallback to mSBC T1 settings");
+                     bta_ag_cb.sco.p_curr_scb->codec_msbc_settings = BTA_AG_SCO_MSBC_SETTINGS_T1;
+                }
+                else
+                {
+                    APPL_TRACE_DEBUG("Fallback to CVSD settings");
+                    bta_ag_cb.sco.p_curr_scb->codec_fallback = TRUE;
+                }
             }
         }
 
@@ -239,7 +267,7 @@ static void bta_ag_sco_disc_cback(UINT16 sco_idx)
     /* no match found */
     else
     {
-        APPL_TRACE_DEBUG0("no scb for ag_sco_disc_cback");
+        APPL_TRACE_DEBUG("no scb for ag_sco_disc_cback");
 
         /* sco could be closed after scb dealloc'ed */
         if (bta_ag_cb.sco.p_curr_scb != NULL)
@@ -265,7 +293,7 @@ static void bta_ag_sco_read_cback (UINT16 sco_inx, BT_HDR *p_data, tBTM_SCO_DATA
 {
     if (status != BTM_SCO_DATA_CORRECT)
     {
-        APPL_TRACE_DEBUG1("bta_ag_sco_read_cback: status(%d)", status);
+        APPL_TRACE_DEBUG("bta_ag_sco_read_cback: status(%d)", status);
     }
 
     /* Callout function must free the data. */
@@ -293,7 +321,7 @@ static BOOLEAN bta_ag_remove_sco(tBTA_AG_SCB *p_scb, BOOLEAN only_active)
         {
             status = BTM_RemoveSco(p_scb->sco_idx);
 
-            APPL_TRACE_DEBUG2("ag remove sco: inx 0x%04x, status:0x%x", p_scb->sco_idx, status);
+            APPL_TRACE_DEBUG("ag remove sco: inx 0x%04x, status:0x%x", p_scb->sco_idx, status);
 
             if (status == BTM_CMD_STARTED)
             {
@@ -340,7 +368,7 @@ static void bta_ag_esco_connreq_cback(tBTM_ESCO_EVT event, tBTM_ESCO_EVT_DATA *p
             /* If no other SCO active, allow this one */
             if (!bta_ag_cb.sco.p_curr_scb)
             {
-                APPL_TRACE_EVENT1("bta_ag_esco_connreq_cback: Accept Conn Request (sco_inx 0x%04x)", sco_inx);
+                APPL_TRACE_EVENT("bta_ag_esco_connreq_cback: Accept Conn Request (sco_inx 0x%04x)", sco_inx);
                 bta_ag_sco_conn_rsp(p_scb, &p_data->conn_evt);
 
                 bta_ag_cb.sco.state = BTA_AG_SCO_OPENING_ST;
@@ -349,14 +377,14 @@ static void bta_ag_esco_connreq_cback(tBTM_ESCO_EVT event, tBTM_ESCO_EVT_DATA *p
             }
             else    /* Begin a transfer: Close current SCO before responding */
             {
-                APPL_TRACE_DEBUG0("bta_ag_esco_connreq_cback: Begin XFER");
+                APPL_TRACE_DEBUG("bta_ag_esco_connreq_cback: Begin XFER");
                 bta_ag_cb.sco.p_xfer_scb = p_scb;
                 bta_ag_cb.sco.conn_data = p_data->conn_evt;
                 bta_ag_cb.sco.state = BTA_AG_SCO_OPEN_XFER_ST;
 
                 if (!bta_ag_remove_sco(bta_ag_cb.sco.p_curr_scb, TRUE))
                 {
-                    APPL_TRACE_ERROR1("bta_ag_esco_connreq_cback: Nothing to remove so accept Conn Request (sco_inx 0x%04x)", sco_inx);
+                    APPL_TRACE_ERROR("bta_ag_esco_connreq_cback: Nothing to remove so accept Conn Request (sco_inx 0x%04x)", sco_inx);
                     bta_ag_cb.sco.p_xfer_scb = NULL;
                     bta_ag_cb.sco.state = BTA_AG_SCO_LISTEN_ST;
 
@@ -367,14 +395,14 @@ static void bta_ag_esco_connreq_cback(tBTM_ESCO_EVT event, tBTM_ESCO_EVT_DATA *p
         /* If error occurred send reject response immediately */
         else
         {
-            APPL_TRACE_WARNING0("no scb for bta_ag_esco_connreq_cback or no resources");
+            APPL_TRACE_WARNING("no scb for bta_ag_esco_connreq_cback or no resources");
             BTM_EScoConnRsp(p_data->conn_evt.sco_inx, HCI_ERR_HOST_REJECT_RESOURCES, NULL);
         }
     }
     /* Received a change in the esco link */
     else if (event == BTM_ESCO_CHG_EVT)
     {
-        APPL_TRACE_EVENT5("eSCO change event (inx %d): rtrans %d, rxlen %d, txlen %d, txint %d",
+        APPL_TRACE_EVENT("eSCO change event (inx %d): rtrans %d, rxlen %d, txlen %d, txint %d",
             p_data->chg_evt.sco_inx,
             p_data->chg_evt.retrans_window, p_data->chg_evt.rx_pkt_len,
             p_data->chg_evt.tx_pkt_len, p_data->chg_evt.tx_interval);
@@ -430,7 +458,7 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
     /* Make sure this sco handle is not already in use */
     if (p_scb->sco_idx != BTM_INVALID_SCO_INDEX)
     {
-        APPL_TRACE_WARNING1("bta_ag_create_sco: Index 0x%04x Already In Use!",
+        APPL_TRACE_WARNING("bta_ag_create_sco: Index 0x%04x Already In Use!",
                              p_scb->sco_idx);
         return;
     }
@@ -449,11 +477,23 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
         p_scb->codec_updated = TRUE;
     }
 
+    /* If WBS included, use CVSD by default, index is 0 for CVSD by initialization */
+    /* If eSCO codec is mSBC, index is T2 or T1 */
     if (esco_codec == BTM_SCO_CODEC_MSBC)
-        codec_index = esco_codec - 1;
+    {
+        if (p_scb->codec_msbc_settings == BTA_AG_SCO_MSBC_SETTINGS_T2)
+        {
+            codec_index = BTA_AG_ESCO_SETTING_IDX_T2;
+        }
+        else
+        {
+            codec_index = BTA_AG_ESCO_SETTING_IDX_T1;
+        }
+    }
 
     params = bta_ag_esco_params[codec_index];
 #else
+    /* When WBS is not included, use CVSD by default */
     params = bta_ag_esco_params;
 #endif
 
@@ -463,7 +503,7 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
     if(!bta_ag_cb.sco.param_updated)
     {
 #if (BTM_WBS_INCLUDED == TRUE)
-        if (!codec_index)   /* For non-WBS */
+        if (esco_codec == BTM_SCO_CODEC_CVSD)   /* For CVSD */
 #endif
         {
             /* Use the application packet types (5 slot EV packets not allowed) */
@@ -490,23 +530,23 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
                 if (esco_codec != BTA_AG_CODEC_MSBC)
                 {
                     p_scb->retry_with_sco_only = TRUE;
-                    APPL_TRACE_API0("Setting retry_with_sco_only to TRUE");
+                    APPL_TRACE_API("Setting retry_with_sco_only to TRUE");
                 }
                 else    /* Do not use SCO when using mSBC */
                 {
                     p_scb->retry_with_sco_only = FALSE;
-                    APPL_TRACE_API0("Setting retry_with_sco_only to FALSE");
+                    APPL_TRACE_API("Setting retry_with_sco_only to FALSE");
                 }
 #else
                 p_scb->retry_with_sco_only = TRUE;
-                APPL_TRACE_API0("Setting retry_with_sco_only to TRUE");
+                APPL_TRACE_API("Setting retry_with_sco_only to TRUE");
 #endif
             }
         }
         else
         {
             if(p_scb->retry_with_sco_only)
-                APPL_TRACE_API0("retrying with SCO only");
+                APPL_TRACE_API("retrying with SCO only");
             p_scb->retry_with_sco_only = FALSE;
 
             BTM_SetEScoMode(BTM_LINK_TYPE_SCO, &params);
@@ -517,8 +557,23 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
         /* tell sys to stop av if any */
         bta_sys_sco_use(BTA_ID_AG, p_scb->app_id, p_scb->peer_addr);
 
+#if (BTM_WBS_INCLUDED == TRUE )
+        /* Allow any platform specific pre-SCO set up to take place */
+        bta_ag_co_audio_state(bta_ag_scb_to_idx(p_scb), p_scb->app_id, BTA_AG_CO_AUD_STATE_SETUP,\
+        esco_codec);
+
+        /* This setting may not be necessary */
+        /* To be verified with stable 2049 boards */
+        if (esco_codec == BTA_AG_CODEC_MSBC)
+            BTM_WriteVoiceSettings (BTM_VOICE_SETTING_TRANS);
+        else
+            BTM_WriteVoiceSettings (BTM_VOICE_SETTING_CVSD);
+        /* save the current codec because sco_codec can be updated while SCO is open. */
+        p_scb->inuse_codec = esco_codec;
+#else
         /* Allow any platform specific pre-SCO set up to take place */
         bta_ag_co_audio_state(bta_ag_scb_to_idx(p_scb), p_scb->app_id, BTA_AG_CO_AUD_STATE_SETUP);
+#endif
 
 #if (BTM_SCO_HCI_INCLUDED == TRUE )
 #if (BTM_WBS_INCLUDED == TRUE)
@@ -531,26 +586,6 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
         sco_route = bta_dm_sco_co_init(pcm_sample_rate, pcm_sample_rate, &codec_info, p_scb->app_id);
 #endif
 
-#if (BTM_WBS_INCLUDED == TRUE )
-        if (esco_codec == BTA_AG_CODEC_MSBC)
-        {
-            /* Enable mSBC codec in fw */
-            BTM_SetWBSCodec (esco_codec);
-        }
-
-        /* Specify PCM input for SBC codec in fw */
-        BTM_ConfigI2SPCM (esco_codec, (UINT8)HCI_BRCM_I2SPCM_IS_DEFAULT_ROLE, (UINT8)HCI_BRCM_I2SPCM_SAMPLE_DEFAULT, (UINT8)HCI_BRCM_I2SPCM_CLOCK_DEFAULT);
-
-        /* This setting may not be necessary */
-        /* To be verified with stable 2049 boards */
-        if (esco_codec == BTA_AG_CODEC_MSBC)
-            BTM_WriteVoiceSettings (BTM_VOICE_SETTING_TRANS);
-        else
-            BTM_WriteVoiceSettings (BTM_VOICE_SETTING_CVSD);
-
-        /* save the current codec because sco_codec can be updated while SCO is open. */
-        p_scb->inuse_codec = esco_codec;
-#endif
 
 #if (I2SPCM_SLAVE_BRCM == TRUE )
         /* Configure I2SPCM slave path */
@@ -585,11 +620,30 @@ static void bta_ag_create_sco(tBTA_AG_SCB *p_scb, BOOLEAN is_orig)
         }
     }
 
-    APPL_TRACE_API4("ag create sco: orig %d, inx 0x%04x, status 0x%x, pkt types 0x%04x",
+    APPL_TRACE_API("ag create sco: orig %d, inx 0x%04x, status 0x%x, pkt types 0x%04x",
                       is_orig, p_scb->sco_idx, status, params.packet_types);
 }
 
 #if (BTM_WBS_INCLUDED == TRUE )
+/*******************************************************************************
+**
+** Function         bta_ag_attempt_msbc_safe_settings
+**
+** Description    Checks if ESCO connection needs to be attempted using mSBC T1(safe) settings
+**
+**
+** Returns          TRUE if T1 settings has to be used, FALSE otherwise
+**
+*******************************************************************************/
+BOOLEAN bta_ag_attempt_msbc_safe_settings(tBTA_AG_SCB *p_scb)
+{
+    if (p_scb->svc_conn && p_scb->sco_codec == BTM_SCO_CODEC_MSBC &&
+        p_scb->codec_msbc_settings == BTA_AG_SCO_MSBC_SETTINGS_T1)
+        return TRUE;
+    else
+        return FALSE;
+}
+
 /*******************************************************************************
 **
 ** Function         bta_ag_cn_timer_cback
@@ -633,7 +687,9 @@ void bta_ag_codec_negotiate(tBTA_AG_SCB *p_scb)
 {
     bta_ag_cb.sco.p_curr_scb = p_scb;
 
-    if (p_scb->codec_updated || p_scb->codec_fallback)
+    if ((p_scb->codec_updated || p_scb->codec_fallback ||
+        bta_ag_attempt_msbc_safe_settings(p_scb)) &&
+       (p_scb->peer_features & BTA_AG_PEER_FEAT_CODEC))
     {
         /* Change the power mode to Active until sco open is completed. */
         bta_sys_busy(BTA_ID_AG, p_scb->app_id, p_scb->peer_addr);
@@ -649,10 +705,11 @@ void bta_ag_codec_negotiate(tBTA_AG_SCB *p_scb)
     else
     {
         /* use same codec type as previous SCO connection, skip codec negotiation */
+        APPL_TRACE_DEBUG("use same codec type as previous SCO connection,skip codec negotiation");
         bta_ag_sco_codec_nego(p_scb, TRUE);
     }
 }
-#endif
+#endif /* (BTM_WBS_INCLUDED == TRUE ) */
 
 /*******************************************************************************
 **
@@ -676,12 +733,12 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
 #if BTA_AG_SCO_DEBUG == TRUE
     UINT8   in_state = p_sco->state;
 
-    APPL_TRACE_EVENT5("BTA ag sco evt (hdl 0x%04x): State %d (%s), Event %d (%s)",
+    APPL_TRACE_EVENT("BTA ag sco evt (hdl 0x%04x): State %d (%s), Event %d (%s)",
                         p_scb->sco_idx,
                         p_sco->state, bta_ag_sco_state_str(p_sco->state),
                         event, bta_ag_sco_evt_str(event));
 #else
-    APPL_TRACE_EVENT3("BTA ag sco evt (hdl 0x%04x): State %d, Event %d",
+    APPL_TRACE_EVENT("BTA ag sco evt (hdl 0x%04x): State %d, Event %d",
                       p_scb->sco_idx, p_sco->state, event);
 #endif
 
@@ -718,7 +775,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_SHUTDOWN_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_SHUTDOWN_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -763,7 +820,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                 case BTA_AG_SCO_CLOSE_E:
                     /* remove listening connection */
                     /* Ignore the event. We need to keep listening SCO for the active SLC */
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_LISTEN_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_LISTEN_ST: Ignoring event %d", event);
                     break;
 
                 case BTA_AG_SCO_CONN_CLOSE_E:
@@ -773,7 +830,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_LISTEN_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_LISTEN_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -825,7 +882,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_CODEC_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_CODEC_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -884,7 +941,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_OPENING_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_OPENING_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -929,7 +986,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_OPEN_CL_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_OPEN_CL_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -965,7 +1022,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                      break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_OPEN_XFER_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_OPEN_XFER_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -1018,7 +1075,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_OPEN_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_OPEN_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -1065,7 +1122,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_CLOSING_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_CLOSING_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -1102,7 +1159,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_CLOSE_OP_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_CLOSE_OP_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -1151,7 +1208,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_CLOSE_XFER_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_CLOSE_XFER_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -1208,7 +1265,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
                     break;
 
                 default:
-                    APPL_TRACE_WARNING1("BTA_AG_SCO_SHUTTING_ST: Ignoring event %d", event);
+                    APPL_TRACE_WARNING("BTA_AG_SCO_SHUTTING_ST: Ignoring event %d", event);
                     break;
             }
             break;
@@ -1219,7 +1276,7 @@ static void bta_ag_sco_event(tBTA_AG_SCB *p_scb, UINT8 event)
 #if BTA_AG_SCO_DEBUG == TRUE
     if (p_sco->state != in_state)
     {
-        APPL_TRACE_EVENT3("BTA AG SCO State Change: [%s] -> [%s] after Event [%s]",
+        APPL_TRACE_EVENT("BTA AG SCO State Change: [%s] -> [%s] after Event [%s]",
                       bta_ag_sco_state_str(in_state),
                       bta_ag_sco_state_str(p_sco->state),
                       bta_ag_sco_evt_str(event));
@@ -1284,6 +1341,7 @@ BOOLEAN bta_ag_sco_is_opening(tBTA_AG_SCB *p_scb)
 *******************************************************************************/
 void bta_ag_sco_listen(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_data);
     bta_ag_sco_event(p_scb, BTA_AG_SCO_LISTEN_E);
 }
 
@@ -1300,6 +1358,7 @@ void bta_ag_sco_listen(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 void bta_ag_sco_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
     UINT8 event;
+    UNUSED(p_data);
 
     /* if another scb using sco, this is a transfer */
     if (bta_ag_cb.sco.p_curr_scb != NULL && bta_ag_cb.sco.p_curr_scb != p_scb)
@@ -1327,6 +1386,8 @@ void bta_ag_sco_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 *******************************************************************************/
 void bta_ag_sco_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_data);
+
     /* if scb is in use */
 #if (BTM_WBS_INCLUDED == TRUE )
     /* sco_idx is not allocated in SCO_CODEC_ST, we still need to move to listening state. */
@@ -1335,7 +1396,7 @@ void bta_ag_sco_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
     if (p_scb->sco_idx != BTM_INVALID_SCO_INDEX)
 #endif
     {
-        APPL_TRACE_DEBUG1("bta_ag_sco_close: sco_inx = %d", p_scb->sco_idx);
+        APPL_TRACE_DEBUG("bta_ag_sco_close: sco_inx = %d", p_scb->sco_idx);
         bta_ag_sco_event(p_scb, BTA_AG_SCO_CLOSE_E);
     }
 }
@@ -1378,6 +1439,8 @@ void bta_ag_sco_codec_nego(tBTA_AG_SCB *p_scb, BOOLEAN result)
 *******************************************************************************/
 void bta_ag_sco_shutdown(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_data);
+
     bta_ag_sco_event(p_scb, BTA_AG_SCO_SHUTDOWN_E);
 }
 
@@ -1393,11 +1456,18 @@ void bta_ag_sco_shutdown(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 *******************************************************************************/
 void bta_ag_sco_conn_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_data);
+
     bta_ag_sco_event(p_scb, BTA_AG_SCO_CONN_OPEN_E);
 
     bta_sys_sco_open(BTA_ID_AG, p_scb->app_id, p_scb->peer_addr);
 
+#if (BTM_WBS_INCLUDED == TRUE)
+    bta_ag_co_audio_state(bta_ag_scb_to_idx(p_scb), p_scb->app_id, BTA_AG_CO_AUD_STATE_ON,
+                          p_scb->inuse_codec);
+#else
     bta_ag_co_audio_state(bta_ag_scb_to_idx(p_scb), p_scb->app_id, BTA_AG_CO_AUD_STATE_ON);
+#endif
 
 #if (BTM_SCO_HCI_INCLUDED == TRUE )
     /* open SCO codec if SCO is routed through transport */
@@ -1408,6 +1478,10 @@ void bta_ag_sco_conn_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
     bta_ag_cback_sco(p_scb, BTA_AG_AUDIO_OPEN_EVT);
 
     p_scb->retry_with_sco_only = FALSE;
+#if (BTM_WBS_INCLUDED == TRUE)
+    /* reset to mSBC T2 settings as the preferred */
+    p_scb->codec_msbc_settings = BTA_AG_SCO_MSBC_SETTINGS_T2;
+#endif
 }
 
 /*******************************************************************************
@@ -1423,6 +1497,7 @@ void bta_ag_sco_conn_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 void bta_ag_sco_conn_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
     UINT16 handle = bta_ag_scb_to_idx(p_scb);
+    UNUSED(p_data);
 
     /* clear current scb */
     bta_ag_cb.sco.p_curr_scb = NULL;
@@ -1430,7 +1505,9 @@ void bta_ag_sco_conn_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 
 #if (BTM_WBS_INCLUDED == TRUE)
     /* codec_fallback is set when AG is initiator and connection failed for mSBC. */
-    if (p_scb->codec_fallback && p_scb->svc_conn)
+    /* OR if codec is msbc and T2 settings failed, then retry Safe T1 settings */
+    if ((p_scb->codec_fallback && p_scb->svc_conn) ||
+         bta_ag_attempt_msbc_safe_settings(p_scb))
     {
         bta_ag_sco_event(p_scb, BTA_AG_SCO_REOPEN_E);
     }
@@ -1449,12 +1526,15 @@ void bta_ag_sco_conn_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 #endif
     else
     {
+#if (BTM_WBS_INCLUDED == TRUE)
         /* Indicate if the closing of audio is because of transfer */
-        if (bta_ag_cb.sco.p_xfer_scb)
-            bta_ag_co_audio_state(handle, p_scb->app_id, BTA_AG_CO_AUD_STATE_OFF_XFER);
-        else
-            bta_ag_co_audio_state(handle, p_scb->app_id, BTA_AG_CO_AUD_STATE_OFF);
-
+        bta_ag_co_audio_state(handle, p_scb->app_id,(bta_ag_cb.sco.p_xfer_scb)?\
+        BTA_AG_CO_AUD_STATE_OFF_XFER:BTA_AG_CO_AUD_STATE_OFF,p_scb->inuse_codec);
+#else
+        /* Indicate if the closing of audio is because of transfer */
+        bta_ag_co_audio_state(handle, p_scb->app_id,(bta_ag_cb.sco.p_xfer_scb)?\
+        BTA_AG_CO_AUD_STATE_OFF_XFER:BTA_AG_CO_AUD_STATE_OFF);
+#endif
         bta_ag_sco_event(p_scb, BTA_AG_SCO_CONN_CLOSE_E);
 
         bta_sys_sco_close(BTA_ID_AG, p_scb->app_id, p_scb->peer_addr);
@@ -1469,6 +1549,9 @@ void bta_ag_sco_conn_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 
         /* call app callback */
         bta_ag_cback_sco(p_scb, BTA_AG_AUDIO_CLOSE_EVT);
+#if (BTM_WBS_INCLUDED == TRUE)
+        p_scb->codec_msbc_settings = BTA_AG_SCO_MSBC_SETTINGS_T2;
+#endif
     }
     p_scb->retry_with_sco_only = FALSE;
 }
@@ -1528,12 +1611,14 @@ void bta_ag_sco_conn_rsp(tBTA_AG_SCB *p_scb, tBTM_ESCO_CONN_REQ_EVT_DATA *p_data
         /* tell sys to stop av if any */
         bta_sys_sco_use(BTA_ID_AG, p_scb->app_id, p_scb->peer_addr);
 
+#if (BTM_WBS_INCLUDED == FALSE )
         /* Allow any platform specific pre-SCO set up to take place */
         bta_ag_co_audio_state(bta_ag_scb_to_idx(p_scb), p_scb->app_id, BTA_AG_CO_AUD_STATE_SETUP);
-
-#if (BTM_WBS_INCLUDED == TRUE )
+#else
         /* When HS initiated SCO, it cannot be WBS. */
-        BTM_ConfigI2SPCM (BTM_SCO_CODEC_CVSD, (UINT8)HCI_BRCM_I2SPCM_IS_DEFAULT_ROLE, (UINT8)HCI_BRCM_I2SPCM_SAMPLE_DEFAULT, (UINT8)HCI_BRCM_I2SPCM_CLOCK_DEFAULT);
+        /* Allow any platform specific pre-SCO set up to take place */
+        bta_ag_co_audio_state(bta_ag_scb_to_idx(p_scb), p_scb->app_id, BTA_AG_CO_AUD_STATE_SETUP,
+                              BTA_AG_CODEC_CVSD);
 #endif
 
 #if (BTM_SCO_HCI_INCLUDED == TRUE )
@@ -1567,6 +1652,9 @@ void bta_ag_sco_conn_rsp(tBTA_AG_SCB *p_scb, tBTM_ESCO_CONN_REQ_EVT_DATA *p_data
 *******************************************************************************/
 void bta_ag_ci_sco_data(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_scb);
+    UNUSED(p_data);
+
 #if (BTM_SCO_HCI_INCLUDED == TRUE )
     bta_ag_sco_event(p_scb, BTA_AG_SCO_CI_DATA_E);
 #endif
@@ -1587,13 +1675,13 @@ void bta_ag_set_esco_param(BOOLEAN set_reset, tBTM_ESCO_PARAMS *param)
     if(set_reset == FALSE)    /* reset the parameters to default */
     {
         bta_ag_cb.sco.param_updated = FALSE;
-        APPL_TRACE_DEBUG0("bta_ag_set_esco_param : Resetting ESCO parameters to default");
+        APPL_TRACE_DEBUG("bta_ag_set_esco_param : Resetting ESCO parameters to default");
     }
     else
     {
         bta_ag_cb.sco.param_updated = TRUE;
         bta_ag_cb.sco.params = *param;
-        APPL_TRACE_DEBUG0("bta_ag_set_esco_param : Setting ESCO parameters");
+        APPL_TRACE_DEBUG("bta_ag_set_esco_param : Setting ESCO parameters");
     }
 }
 

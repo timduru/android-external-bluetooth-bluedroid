@@ -1,5 +1,6 @@
 /******************************************************************************
  *
+ *  Copyright (c) 2014 The Android Open Source Project
  *  Copyright (C) 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -47,6 +48,7 @@
 #include "bta_ag_api.h"
 #include "bta_av_api.h"
 #include "bta_hh_api.h"
+#include "bta_hf_client_api.h"
 #include "avrc_defs.h"
 
 
@@ -85,7 +87,7 @@ int str2bd(char *str, bt_bdaddr_t *addr)
 {
     int32_t i = 0;
     for (i = 0; i < 6; i++) {
-       addr->address[i] = (uint8_t) strtoul(str, (char **)&str, 16);
+       addr->address[i] = (uint8_t)strtoul(str, &str, 16);
        str++;
     }
     return 0;
@@ -93,12 +95,12 @@ int str2bd(char *str, bt_bdaddr_t *addr)
 
 char *bd2str(const bt_bdaddr_t *bdaddr, bdstr_t *bdstr)
 {
-    char *addr = (char *) bdaddr->address;
+    const uint8_t *addr = bdaddr->address;
 
-    sprintf((char*)bdstr, "%02x:%02x:%02x:%02x:%02x:%02x",
-                       (int)addr[0],(int)addr[1],(int)addr[2],
-                       (int)addr[3],(int)addr[4],(int)addr[5]);
-    return (char *)bdstr;
+    sprintf(*bdstr, "%02x:%02x:%02x:%02x:%02x:%02x",
+             addr[0], addr[1], addr[2],
+             addr[3], addr[4], addr[5]);
+    return *bdstr;
 }
 
 UINT32 devclass2uint(DEV_CLASS dev_class)
@@ -280,6 +282,7 @@ const char* dump_dm_event(UINT16 event)
         CASE_RETURN_STR(BTA_DM_BLE_AUTH_CMPL_EVT)
         CASE_RETURN_STR(BTA_DM_DEV_UNPAIRED_EVT)
         CASE_RETURN_STR(BTA_DM_HW_ERROR_EVT)
+        CASE_RETURN_STR(BTA_DM_ENER_INFO_READ)
 
         default:
             return "UNKNOWN DM EVENT";
@@ -301,7 +304,9 @@ const char* dump_hf_event(UINT16 event)
         CASE_RETURN_STR(BTA_AG_MIC_EVT)
         CASE_RETURN_STR(BTA_AG_AT_CKPD_EVT)
         CASE_RETURN_STR(BTA_AG_DISABLE_EVT)
-
+#if (BTM_WBS_INCLUDED == TRUE )
+        CASE_RETURN_STR(BTA_AG_WBS_EVT)
+#endif
         CASE_RETURN_STR(BTA_AG_AT_A_EVT)
         CASE_RETURN_STR(BTA_AG_AT_D_EVT)
         CASE_RETURN_STR(BTA_AG_AT_CHLD_EVT)
@@ -321,6 +326,38 @@ const char* dump_hf_event(UINT16 event)
         CASE_RETURN_STR(BTA_AG_AT_BAC_EVT)
         CASE_RETURN_STR(BTA_AG_AT_BCS_EVT)
 
+        default:
+            return "UNKNOWN MSG ID";
+     }
+}
+
+const char* dump_hf_client_event(UINT16 event)
+{
+    switch(event)
+    {
+        CASE_RETURN_STR(BTA_HF_CLIENT_ENABLE_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_REGISTER_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_OPEN_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_CLOSE_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_CONN_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_AUDIO_OPEN_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_AUDIO_MSBC_OPEN_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_AUDIO_CLOSE_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_SPK_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_MIC_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_DISABLE_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_IND_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_VOICE_REC_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_OPERATOR_NAME_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_CLIP_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_CCWA_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_AT_RESULT_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_CLCC_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_CNUM_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_BTRH_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_BSIR_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_BINP_EVT)
+        CASE_RETURN_STR(BTA_HF_CLIENT_RING_INDICATION)
         default:
             return "UNKNOWN MSG ID";
      }

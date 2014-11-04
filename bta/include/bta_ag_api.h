@@ -229,7 +229,9 @@ typedef struct
 #define BTA_AG_MIC_EVT          8  /* Microphone volume changed */
 #define BTA_AG_AT_CKPD_EVT      9  /* CKPD from the HS */
 #define BTA_AG_DISABLE_EVT      30 /* AG disabled       */
-
+#if (BTM_WBS_INCLUDED == TRUE )
+#define BTA_AG_WBS_EVT          31 /* SCO codec info */
+#endif
 /* Values below are for HFP only */
 #define BTA_AG_AT_A_EVT         10 /* Answer a call */
 #define BTA_AG_AT_D_EVT         11 /* Place a call using number or memory dial */
@@ -247,7 +249,7 @@ typedef struct
 #define BTA_AG_AT_COPS_EVT      23 /* Query list of current calls */
 #define BTA_AG_AT_UNAT_EVT      24 /* Unknown AT command */
 #define BTA_AG_AT_CBC_EVT       25 /* Battery Level report from HF */
-#define BTA_AG_AT_BAC_EVT       26 /* Codec select */
+#define BTA_AG_AT_BAC_EVT       26 /* avablable codec */
 #define BTA_AG_AT_BCS_EVT       27 /* Codec select */
 
 typedef UINT8 tBTA_AG_EVT;
@@ -257,6 +259,7 @@ typedef struct
 {
     UINT16              handle;
     UINT8               app_id;
+    tBTA_AG_STATUS      status;
 } tBTA_AG_HDR;
 
 /* data associated with BTA_AG_REGISTER_EVT */
@@ -275,11 +278,19 @@ typedef struct
     tBTA_AG_STATUS      status;
 } tBTA_AG_OPEN;
 
+/* data associated with BTA_AG_CLOSE_EVT */
+typedef struct
+{
+    tBTA_AG_HDR         hdr;
+    BD_ADDR             bd_addr;
+} tBTA_AG_CLOSE;
+
 /* data associated with BTA_AG_CONN_EVT */
 typedef struct
 {
     tBTA_AG_HDR         hdr;
     tBTA_AG_PEER_FEAT   peer_feat;
+    BD_ADDR             bd_addr;
     tBTA_AG_PEER_CODEC  peer_codec;
 } tBTA_AG_CONN;
 
@@ -287,6 +298,7 @@ typedef struct
 typedef struct
 {
     tBTA_AG_HDR         hdr;
+    BD_ADDR             bd_addr;
     char                str[BTA_AG_AT_MAX_LEN+1];
     UINT16              num;
     UINT8               idx;    /* call number used by CLCC and CHLD */
@@ -298,6 +310,7 @@ typedef union
     tBTA_AG_HDR         hdr;
     tBTA_AG_REGISTER    reg;
     tBTA_AG_OPEN        open;
+    tBTA_AG_CLOSE       close;
     tBTA_AG_CONN        conn;
     tBTA_AG_VAL         val;
 } tBTA_AG;

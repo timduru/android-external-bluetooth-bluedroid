@@ -176,6 +176,68 @@ void AVDT_Deregister(void)
 
 /*******************************************************************************
 **
+** Function         AVDT_SINK_Activate
+**
+** Description      Activate SEP of A2DP Sink. In Use parameter is adjusted.
+**                  In Use will be made false in case of activation. A2DP SRC
+**                  will receive in_use as false and can open A2DP Sink
+**                  connection
+**
+** Returns          void.
+**
+*******************************************************************************/
+void AVDT_SINK_Activate()
+{
+    tAVDT_SCB           *p_scb = &avdt_cb.scb[0];
+    int                 i;
+    AVDT_TRACE_DEBUG("AVDT_SINK_Activate");
+    /* for all allocated scbs */
+    for (i = 0; i < AVDT_NUM_SEPS; i++, p_scb++)
+    {
+        if ((p_scb->allocated) && (p_scb->cs.tsep == AVDT_TSEP_SNK))
+        {
+            AVDT_TRACE_DEBUG("AVDT_SINK_Activate found scb");
+            p_scb->sink_activated = TRUE;
+            /* update in_use */
+            p_scb->in_use = FALSE;
+            break;
+        }
+    }
+}
+
+/*******************************************************************************
+**
+** Function         AVDT_SINK_Deactivate
+**
+** Description      Deactivate SEP of A2DP Sink. In Use parameter is adjusted.
+**                  In Use will be made TRUE in case of activation. A2DP SRC
+**                  will receive in_use as true and will not open A2DP Sink
+**                  connection
+**
+** Returns          void.
+**
+*******************************************************************************/
+void AVDT_SINK_Deactivate()
+{
+    tAVDT_SCB           *p_scb = &avdt_cb.scb[0];
+    int                 i;
+    AVDT_TRACE_DEBUG("AVDT_SINK_Deactivate");
+    /* for all allocated scbs */
+    for (i = 0; i < AVDT_NUM_SEPS; i++, p_scb++)
+    {
+        if ((p_scb->allocated) && (p_scb->cs.tsep == AVDT_TSEP_SNK))
+        {
+            AVDT_TRACE_DEBUG("AVDT_SINK_Deactivate, found scb");
+            p_scb->sink_activated = FALSE;
+            /* update in_use */
+            p_scb->in_use = TRUE;
+            break;
+        }
+    }
+}
+
+/*******************************************************************************
+**
 ** Function         AVDT_CreateStream
 **
 ** Description      Create a stream endpoint.  After a stream endpoint is
@@ -329,7 +391,7 @@ static UINT16 avdt_get_cap_req(BD_ADDR bd_addr, tAVDT_CCB_API_GETCAP *p_evt)
     /* verify SEID */
     if ((p_evt->single.seid < AVDT_SEID_MIN) || (p_evt->single.seid > AVDT_SEID_MAX))
     {
-        AVDT_TRACE_ERROR1("seid: %d", p_evt->single.seid);
+        AVDT_TRACE_ERROR("seid: %d", p_evt->single.seid);
         result = AVDT_BAD_PARAMS;
     }
     /* find channel control block for this bd addr; if none, allocate one */
@@ -1017,7 +1079,7 @@ UINT16 AVDT_ConnectReq(BD_ADDR bd_addr, UINT8 sec_mask, tAVDT_CTRL_CBACK *p_cbac
     }
     else if (p_ccb->ll_opened == FALSE)
     {
-        AVDT_TRACE_WARNING0("AVDT_ConnectReq: CCB LL is in the middle of opening");
+        AVDT_TRACE_WARNING("AVDT_ConnectReq: CCB LL is in the middle of opening");
 
         /* ccb was already allocated for the incoming signalling. */
         result = AVDT_BUSY;
@@ -1178,7 +1240,7 @@ AVDT_API extern UINT16 AVDT_WriteDataReq(UINT8 handle, UINT8 *p_data, UINT32 dat
             result = AVDT_BAD_HANDLE;
             break;
         }
-        AVDT_TRACE_WARNING1("mux_tsid_media:%d", p_scb->curr_cfg.mux_tsid_media);
+        AVDT_TRACE_WARNING("mux_tsid_media:%d", p_scb->curr_cfg.mux_tsid_media);
 
         if (p_scb->p_pkt != NULL
             || p_scb->p_ccb == NULL
@@ -1187,7 +1249,7 @@ AVDT_API extern UINT16 AVDT_WriteDataReq(UINT8 handle, UINT8 *p_data, UINT32 dat
             || p_scb->curr_cfg.mux_tsid_media == 0)
         {
             result = AVDT_ERR_BAD_STATE;
-            AVDT_TRACE_WARNING4("p_scb->p_pkt=%x, p_scb->p_ccb=%x, IsQueueEmpty=%x, p_scb->frag_off=%x",
+            AVDT_TRACE_WARNING("p_scb->p_pkt=%x, p_scb->p_ccb=%x, IsQueueEmpty=%x, p_scb->frag_off=%x",
                 p_scb->p_pkt, p_scb->p_ccb, GKI_queue_is_empty(&p_scb->frag_q), p_scb->frag_off);
             break;
         }
@@ -1200,7 +1262,7 @@ AVDT_API extern UINT16 AVDT_WriteDataReq(UINT8 handle, UINT8 *p_data, UINT32 dat
 
         if(GKI_queue_is_empty(&evt.apiwrite.frag_q))
         {
-            AVDT_TRACE_WARNING0("AVDT_WriteDataReq out of GKI buffers");
+            AVDT_TRACE_WARNING("AVDT_WriteDataReq out of GKI buffers");
             result = AVDT_ERR_RESOURCE;
             break;
         }
@@ -1216,7 +1278,7 @@ AVDT_API extern UINT16 AVDT_WriteDataReq(UINT8 handle, UINT8 *p_data, UINT32 dat
 #if (BT_USE_TRACES == TRUE)
     if(result != AVDT_SUCCESS)
     {
-        AVDT_TRACE_WARNING1("*** AVDT_WriteDataReq failed result=%d",result);
+        AVDT_TRACE_WARNING("*** AVDT_WriteDataReq failed result=%d",result);
     }
 #endif
     return result;
@@ -1343,9 +1405,9 @@ UINT16 AVDT_SendReport(UINT8 handle, AVDT_REPORT_TYPE type,
 
             case AVDT_RTCP_PT_RR:   /* Receiver Report */
                 *p++ = p_data->rr.frag_lost;
-                AVDT_TRACE_API1("packet_lost: %d", p_data->rr.packet_lost);
+                AVDT_TRACE_API("packet_lost: %d", p_data->rr.packet_lost);
                 p_data->rr.packet_lost &= 0xFFFFFF;
-                AVDT_TRACE_API1("packet_lost: %d", p_data->rr.packet_lost);
+                AVDT_TRACE_API("packet_lost: %d", p_data->rr.packet_lost);
                 UINT24_TO_BE_STREAM(p, p_data->rr.packet_lost);
                 UINT32_TO_BE_STREAM(p, p_data->rr.seq_num_rcvd);
                 UINT32_TO_BE_STREAM(p, p_data->rr.jitter);

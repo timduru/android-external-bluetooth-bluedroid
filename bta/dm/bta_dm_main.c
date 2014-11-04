@@ -96,10 +96,29 @@ const tBTA_DM_ACTION bta_dm_action[] =
     bta_dm_ble_set_conn_params,      /* BTA_DM_API_BLE_CONN_PARAM_EVT */
     bta_dm_ble_set_scan_params,      /* BTA_DM_API_BLE_SCAN_PARAM_EVT */
     bta_dm_ble_observe,
+    bta_dm_ble_update_conn_params,   /* BTA_DM_API_UPDATE_CONN_PARAM_EVT */
+#if BLE_PRIVACY_SPT == TRUE
+    bta_dm_ble_config_local_privacy,   /* BTA_DM_API_LOCAL_PRIVACY_EVT */
+#endif
     bta_dm_ble_set_adv_params,     /* BTA_DM_API_BLE_SCAN_PARAM_EVT */
     bta_dm_ble_set_adv_config,     /* BTA_DM_API_BLE_SET_ADV_CONFIG_EVT */
     bta_dm_ble_set_scan_rsp,       /* BTA_DM_API_BLE_SET_SCAN_RSP_EVT */
     bta_dm_ble_broadcast,          /* BTA_DM_API_BLE_BROADCAST_EVT */
+#if BLE_ANDROID_CONTROLLER_SCAN_FILTER == TRUE
+    bta_dm_cfg_filter_cond,         /* BTA_DM_API_CFG_FILTER_COND_EVT */
+    bta_dm_scan_filter_param_setup, /* BTA_DM_API_SCAN_FILTER_SETUP_EVT */
+    bta_dm_enable_scan_filter,      /* BTA_DM_API_SCAN_FILTER_ENABLE_EVT */
+#endif
+    bta_dm_ble_multi_adv_enb,           /*  BTA_DM_API_BLE_MULTI_ADV_ENB_EVT*/
+    bta_dm_ble_multi_adv_upd_param,     /*  BTA_DM_API_BLE_MULTI_ADV_PARAM_UPD_EVT */
+    bta_dm_ble_multi_adv_data,          /*  BTA_DM_API_BLE_MULTI_ADV_DATA_EVT */
+    btm_dm_ble_multi_adv_disable,       /*  BTA_DM_API_BLE_MULTI_ADV_DISABLE_EVT */
+    bta_dm_ble_setup_storage,      /* BTA_DM_API_BLE_SETUP_STORAGE_EVT */
+    bta_dm_ble_enable_batch_scan,  /* BTA_DM_API_BLE_ENABLE_BATCH_SCAN_EVT */
+    bta_dm_ble_disable_batch_scan, /* BTA_DM_API_BLE_DISABLE_BATCH_SCAN_EVT */
+    bta_dm_ble_read_scan_reports,  /* BTA_DM_API_BLE_READ_SCAN_REPORTS_EVT */
+    bta_dm_ble_track_advertiser,   /* BTA_DM_API_BLE_TRACK_ADVERTISER_EVT */
+    bta_dm_ble_get_energy_info,    /* BTA_DM_API_BLE_ENERGY_INFO_EVT */
 #endif
 
 #if ( BTM_EIR_SERVER_INCLUDED == TRUE )&&( BTA_EIR_CANNED_UUID_LIST != TRUE )&&(BTA_EIR_SERVER_NUM_CUSTOM_UUID > 0)
@@ -300,7 +319,7 @@ BOOLEAN bta_dm_sm_execute(BT_HDR *p_msg)
 {
     UINT16  event = p_msg->event & 0x00ff;
 
-    APPL_TRACE_EVENT1("bta_dm_sm_execute event:0x%x", event);
+    APPL_TRACE_EVENT("bta_dm_sm_execute event:0x%x", event);
 
     /* execute action functions */
     if(event < BTA_DM_NUM_ACTIONS)
@@ -344,7 +363,7 @@ BOOLEAN bta_dm_search_sm_execute(BT_HDR *p_msg)
     UINT8               action;
     int                 i;
 
-    APPL_TRACE_EVENT2("bta_dm_search_sm_execute state:%d, event:0x%x",
+    APPL_TRACE_EVENT("bta_dm_search_sm_execute state:%d, event:0x%x",
         bta_dm_search_cb.state, p_msg->event);
 
     /* look up the state table for the current state */

@@ -60,7 +60,7 @@ void BTA_GATTC_Disable(void)
 
     if (bta_sys_is_register(BTA_ID_GATTC) == FALSE)
     {
-        APPL_TRACE_WARNING0("GATTC Module not enabled/already disabled");
+        APPL_TRACE_WARNING("GATTC Module not enabled/already disabled");
         return;
     }
     if ((p_buf = (BT_HDR *) GKI_getbuf(sizeof(BT_HDR))) != NULL)
@@ -91,9 +91,7 @@ void BTA_GATTC_AppRegister(tBT_UUID *p_app_uuid, tBTA_GATTC_CBACK *p_client_cb)
 
     if (bta_sys_is_register(BTA_ID_GATTC) == FALSE)
     {
-        GKI_sched_lock();
         bta_sys_register(BTA_ID_GATTC, &bta_gattc_reg);
-        GKI_sched_unlock();
     }
 
     if ((p_buf = (tBTA_GATTC_API_REG *) GKI_getbuf(sizeof(tBTA_GATTC_API_REG))) != NULL)
@@ -143,11 +141,13 @@ void BTA_GATTC_AppDeregister(tBTA_GATTC_IF client_if)
 ** Parameters       client_if: server interface.
 **                  remote_bda: remote device BD address.
 **                  is_direct: direct connection or background auto connection
+**                  transport: Transport to be used for GATT connection (BREDR/LE)
 **
 ** Returns          void
 **
 *******************************************************************************/
-void BTA_GATTC_Open(tBTA_GATTC_IF client_if, BD_ADDR remote_bda, BOOLEAN is_direct)
+void BTA_GATTC_Open(tBTA_GATTC_IF client_if, BD_ADDR remote_bda,
+                    BOOLEAN is_direct, tBTA_GATT_TRANSPORT transport)
 {
     tBTA_GATTC_API_OPEN  *p_buf;
 
@@ -157,6 +157,7 @@ void BTA_GATTC_Open(tBTA_GATTC_IF client_if, BD_ADDR remote_bda, BOOLEAN is_dire
 
         p_buf->client_if = client_if;
         p_buf->is_direct = is_direct;
+        p_buf->transport = transport;
         memcpy(p_buf->remote_bda, remote_bda, BD_ADDR_LEN);
 
 
@@ -221,6 +222,34 @@ void BTA_GATTC_Close(UINT16 conn_id)
     }
     return;
 
+}
+/*******************************************************************************
+**
+** Function         BTA_GATTC_ConfigureMTU
+**
+** Description      Configure the MTU size in the GATT channel. This can be done
+**                  only once per connection.
+**
+** Parameters       conn_id: connection ID.
+**                  mtu: desired MTU size to use.
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_GATTC_ConfigureMTU (UINT16 conn_id, UINT16 mtu)
+{
+    tBTA_GATTC_API_CFG_MTU  *p_buf;
+
+    if ((p_buf = (tBTA_GATTC_API_CFG_MTU *) GKI_getbuf(sizeof(tBTA_GATTC_API_CFG_MTU))) != NULL)
+    {
+        p_buf->hdr.event = BTA_GATTC_API_CFG_MTU_EVT;
+        p_buf->hdr.layer_specific = conn_id;
+
+        p_buf->mtu = mtu;
+
+        bta_sys_sendmsg(p_buf);
+    }
+    return;
 }
 /*******************************************************************************
 **
@@ -386,7 +415,6 @@ tBTA_GATT_STATUS  BTA_GATTC_GetFirstCharDescr (UINT16 conn_id, tBTA_GATTC_CHAR_I
         memcpy(&p_descr_result->descr_id, &p_descr_result->char_id.char_id, sizeof(tBTA_GATT_ID));
         memcpy(&p_descr_result->char_id, p_char_id, sizeof(tBTA_GATTC_CHAR_ID));
     }
-
     return status;
 
 }
@@ -398,7 +426,7 @@ tBTA_GATT_STATUS  BTA_GATTC_GetFirstCharDescr (UINT16 conn_id, tBTA_GATTC_CHAR_I
 **                  of the characterisctic.
 **
 ** Parameters       conn_id: connection ID which identify the server.
-**                  p_start_descr_id: start the characteristic search from the next record
+**                  p_start_descr_id: start the descriptor search from the next record
 **                           after the one identified by p_start_descr_id.
 **                  p_descr_uuid_cond: Characteristic descriptor UUID, if NULL find
 **                               the first available characteristic descriptor.
@@ -832,7 +860,7 @@ void BTA_GATTC_SendIndConfirm (UINT16 conn_id, tBTA_GATTC_CHAR_ID *p_char_id)
 {
     tBTA_GATTC_API_CONFIRM  *p_buf;
 
-    APPL_TRACE_API3("BTA_GATTC_SendIndConfirm conn_id=%d service uuid1=0x%x char uuid=0x%x",
+    APPL_TRACE_API("BTA_GATTC_SendIndConfirm conn_id=%d service uuid1=0x%x char uuid=0x%x",
                     conn_id, p_char_id->srvc_id.id.uuid.uu.uuid16, p_char_id->char_id.uuid.uu.uuid16);
 
     if ((p_buf = (tBTA_GATTC_API_CONFIRM *) GKI_getbuf(sizeof(tBTA_GATTC_API_CONFIRM))) != NULL)
@@ -874,12 +902,9 @@ tBTA_GATT_STATUS BTA_GATTC_RegisterForNotifications (tBTA_GATTC_IF client_if,
 
     if (!p_char_id)
     {
-        APPL_TRACE_ERROR0("deregistration failed, unknow char id");
+        APPL_TRACE_ERROR("deregistration failed, unknow char id");
         return status;
     }
-
-    /* lock other GKI task */
-    GKI_sched_lock();
 
     if ((p_clreg = bta_gattc_cl_get_regcb(client_if)) != NULL)
     {
@@ -889,7 +914,7 @@ tBTA_GATT_STATUS BTA_GATTC_RegisterForNotifications (tBTA_GATTC_IF client_if,
                  !memcmp(p_clreg->notif_reg[i].remote_bda, bda, BD_ADDR_LEN) &&
                   bta_gattc_charid_compare(&p_clreg->notif_reg[i].char_id, p_char_id))
             {
-                APPL_TRACE_WARNING0("notification already registered");
+                APPL_TRACE_WARNING("notification already registered");
                 status = BTA_GATT_OK;
                 break;
             }
@@ -916,16 +941,14 @@ tBTA_GATT_STATUS BTA_GATTC_RegisterForNotifications (tBTA_GATTC_IF client_if,
             if (i == BTA_GATTC_NOTIF_REG_MAX)
             {
                 status = BTA_GATT_NO_RESOURCES;
-                APPL_TRACE_ERROR0("Max Notification Reached, registration failed.");
+                APPL_TRACE_ERROR("Max Notification Reached, registration failed.");
             }
         }
     }
     else
     {
-        APPL_TRACE_ERROR1("Client_if: %d Not Registered", client_if);
+        APPL_TRACE_ERROR("Client_if: %d Not Registered", client_if);
     }
-
-    GKI_sched_unlock();
 
     return status;
 }
@@ -953,12 +976,9 @@ tBTA_GATT_STATUS BTA_GATTC_DeregisterForNotifications (tBTA_GATTC_IF client_if,
 
     if (!p_char_id)
     {
-        APPL_TRACE_ERROR0("deregistration failed, unknow char id");
+        APPL_TRACE_ERROR("deregistration failed, unknow char id");
         return status;
     }
-
-    /* lock other GKI task */
-    GKI_sched_lock();
 
     if ((p_clreg = bta_gattc_cl_get_regcb(client_if)) != NULL)
     {
@@ -968,7 +988,7 @@ tBTA_GATT_STATUS BTA_GATTC_DeregisterForNotifications (tBTA_GATTC_IF client_if,
                 !memcmp(p_clreg->notif_reg[i].remote_bda, bda, BD_ADDR_LEN) &&
                 bta_gattc_charid_compare(&p_clreg->notif_reg[i].char_id, p_char_id))
             {
-                APPL_TRACE_DEBUG0("Deregistered.");
+                APPL_TRACE_DEBUG("Deregistered.");
                 memset(&p_clreg->notif_reg[i], 0, sizeof(tBTA_GATTC_NOTIF_REG));
                 status = BTA_GATT_OK;
                 break;
@@ -978,15 +998,13 @@ tBTA_GATT_STATUS BTA_GATTC_DeregisterForNotifications (tBTA_GATTC_IF client_if,
         {
             status = BTA_GATT_ERROR;
 
-            APPL_TRACE_ERROR0("registration not found");
+            APPL_TRACE_ERROR("registration not found");
         }
     }
     else
     {
-        APPL_TRACE_ERROR1("Client_if: %d Not Registered", client_if);
+        APPL_TRACE_ERROR("Client_if: %d Not Registered", client_if);
     }
-
-    GKI_sched_unlock();
 
     return status;
 }

@@ -59,7 +59,7 @@ void BTA_GATTS_Disable(void)
 
     if (bta_sys_is_register(BTA_ID_GATTS) == FALSE)
     {
-        APPL_TRACE_WARNING0("GATTS Module not enabled/already disabled");
+        APPL_TRACE_WARNING("GATTS Module not enabled/already disabled");
         return;
     }
 
@@ -90,11 +90,9 @@ void BTA_GATTS_AppRegister(tBT_UUID *p_app_uuid, tBTA_GATTS_CBACK *p_cback)
     tBTA_GATTS_API_REG  *p_buf;
 
     /* register with BTA system manager */
-   if (bta_sys_is_register(BTA_ID_GATTS) == FALSE)
-   {
-        GKI_sched_lock();
+    if (bta_sys_is_register(BTA_ID_GATTS) == FALSE)
+    {
         bta_sys_register(BTA_ID_GATTS, &bta_gatts_reg);
-        GKI_sched_unlock();
     }
 
     if ((p_buf = (tBTA_GATTS_API_REG *) GKI_getbuf(sizeof(tBTA_GATTS_API_REG))) != NULL)
@@ -464,11 +462,13 @@ void BTA_GATTS_SendRsp (UINT16 conn_id, UINT32 trans_id,
 ** Parameters       server_if: server interface.
 **                  remote_bda: remote device BD address.
 **                  is_direct: direct connection or background auto connection
+**                  transport : Transport on which GATT connection to be opened (BR/EDR or LE)
 **
 ** Returns          void
 **
 *******************************************************************************/
-void BTA_GATTS_Open(tBTA_GATTS_IF server_if, BD_ADDR remote_bda, BOOLEAN is_direct)
+void BTA_GATTS_Open(tBTA_GATTS_IF server_if, BD_ADDR remote_bda, BOOLEAN is_direct,
+                    tBTA_GATT_TRANSPORT transport)
 {
     tBTA_GATTS_API_OPEN  *p_buf;
 
@@ -477,6 +477,7 @@ void BTA_GATTS_Open(tBTA_GATTS_IF server_if, BD_ADDR remote_bda, BOOLEAN is_dire
         p_buf->hdr.event = BTA_GATTS_API_OPEN_EVT;
         p_buf->server_if = server_if;
         p_buf->is_direct = is_direct;
+        p_buf->transport = transport;
         memcpy(p_buf->remote_bda, remote_bda, BD_ADDR_LEN);
 
         bta_sys_sendmsg(p_buf);

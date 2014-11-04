@@ -29,7 +29,9 @@
 #include <utils/Log.h>
 #include <stdlib.h>
 #include <fcntl.h>
+
 #include "bt_hci_bdroid.h"
+#include "btsnoop.h"
 #include "hci.h"
 #include "userial.h"
 #include "utils.h"
@@ -150,12 +152,6 @@ typedef struct
 **  Externs
 ******************************************************************************/
 
-extern BUFFER_Q tx_q;
-
-void btsnoop_init(void);
-void btsnoop_close(void);
-void btsnoop_cleanup (void);
-void btsnoop_capture(HC_BT_HDR *p_buf, uint8_t is_rcvd);
 uint8_t hci_h4_send_int_cmd(uint16_t opcode, HC_BT_HDR *p_buf, \
                                   tINT_CMD_CBACK p_cback);
 void lpm_wake_assert(void);
@@ -219,7 +215,7 @@ void get_acl_data_length_cback(void *p_mem)
         if ((status = hci_h4_send_int_cmd(HCI_LE_READ_BUFFER_SIZE, p_buf, \
                                            get_acl_data_length_cback)) == FALSE)
         {
-            bt_hc_cbacks->dealloc((TRANSAC) p_buf, (char *) (p_buf + 1));
+            bt_hc_cbacks->dealloc(p_buf);
             bt_hc_cbacks->postload_cb(NULL, BT_HC_POSTLOAD_SUCCESS);
         }
     }
@@ -230,7 +226,7 @@ void get_acl_data_length_cback(void *p_mem)
 
         if (bt_hc_cbacks)
         {
-            bt_hc_cbacks->dealloc((TRANSAC) p_buf, (char *) (p_buf + 1));
+            bt_hc_cbacks->dealloc(p_buf);
             ALOGE("vendor lib postload completed");
             bt_hc_cbacks->postload_cb(NULL, BT_HC_POSTLOAD_SUCCESS);
         }
@@ -286,8 +282,7 @@ uint8_t internal_event_intercept(void)
                     // Release the p_rcv_msg buffer.
                     if (bt_hc_cbacks)
                     {
-                        bt_hc_cbacks->dealloc((TRANSAC) p_cb->p_rcv_msg, \
-                                              (char *) (p_cb->p_rcv_msg + 1));
+                        bt_hc_cbacks->dealloc(p_cb->p_rcv_msg);
                     }
                 }
                 p_cb->int_cmd_rd_idx = ((p_cb->int_cmd_rd_idx+1) & \
@@ -380,8 +375,7 @@ static HC_BT_HDR *acl_rx_frame_buffer_alloc (void)
 
             if (bt_hc_cbacks)
             {
-                bt_hc_cbacks->dealloc((TRANSAC) p_return_buf, \
-                                          (char *) (p_return_buf + 1));
+                bt_hc_cbacks->dealloc(p_return_buf);
             }
             p_return_buf = NULL;
         }
@@ -509,7 +503,7 @@ static uint8_t acl_rx_frame_end_chk (void)
         p_buf->offset = p_buf->offset - HCI_ACL_PREAMBLE_SIZE;
         p_buf->len = p_buf->len - p_buf->offset;
 
-        btsnoop_capture(p_buf, TRUE);
+        btsnoop_capture(p_buf, true);
 
         /* restore contents */
         memcpy(p, p_cb->preload_buffer, HCI_ACL_PREAMBLE_SIZE);
@@ -520,7 +514,7 @@ static uint8_t acl_rx_frame_end_chk (void)
     else
     {
         /* START PACKET */
-        btsnoop_capture(p_buf, TRUE);
+        btsnoop_capture(p_buf, true);
     }
 
     if (frame_end == TRUE)
@@ -559,8 +553,6 @@ void hci_h4_init(void)
      */
     h4_cb.hc_acl_data_size = 1021;
     h4_cb.hc_ble_acl_data_size = 27;
-
-    btsnoop_init();
 }
 
 /*******************************************************************************
@@ -575,9 +567,6 @@ void hci_h4_init(void)
 void hci_h4_cleanup(void)
 {
     HCIDBG("hci_h4_cleanup");
-
-    btsnoop_close();
-    btsnoop_cleanup();
 }
 
 /*******************************************************************************
@@ -645,7 +634,7 @@ void hci_h4_send_msg(HC_BT_HDR *p_msg)
             bytes_sent = userial_write(event,(uint8_t *) p,bytes_to_send);
 
             /* generate snoop trace message */
-            btsnoop_capture(p_msg, FALSE);
+            btsnoop_capture(p_msg, false);
 
             p_msg->layer_specific = lay_spec;
             /* Adjust offset and length for what we just sent */
@@ -713,7 +702,7 @@ void hci_h4_send_msg(HC_BT_HDR *p_msg)
     }
 
     /* generate snoop trace message */
-    btsnoop_capture(p_msg, FALSE);
+    btsnoop_capture(p_msg, false);
 
     if (bt_hc_cbacks)
     {
@@ -722,7 +711,7 @@ void hci_h4_send_msg(HC_BT_HDR *p_msg)
             (p_msg->layer_specific == lay_spec))
         {
             /* dealloc buffer of internal command */
-            bt_hc_cbacks->dealloc((TRANSAC) p_msg, (char *) (p_msg + 1));
+            bt_hc_cbacks->dealloc(p_msg);
         }
         else
         {
@@ -955,7 +944,7 @@ uint16_t hci_h4_receive_msg(void)
             /* generate snoop trace message */
             /* ACL packet tracing had done in acl_rx_frame_end_chk() */
             if (p_cb->p_rcv_msg->event != MSG_HC_TO_STACK_HCI_ACL)
-                btsnoop_capture(p_cb->p_rcv_msg, TRUE);
+                btsnoop_capture(p_cb->p_rcv_msg, true);
 
             if (p_cb->p_rcv_msg->event == MSG_HC_TO_STACK_HCI_EVT)
                 intercepted = internal_event_intercept();
@@ -1003,9 +992,7 @@ uint8_t hci_h4_send_int_cmd(uint16_t opcode, HC_BT_HDR *p_buf, \
     /* stamp signature to indicate an internal command */
     p_buf->layer_specific = opcode;
 
-    utils_enqueue(&tx_q, (void *) p_buf);
-    bthc_signal_event(HC_EVENT_TX);
-
+    bthc_tx(p_buf);
     return TRUE;
 }
 
@@ -1045,7 +1032,7 @@ void hci_h4_get_acl_data_length(void)
         if ((ret = hci_h4_send_int_cmd(HCI_READ_BUFFER_SIZE, p_buf, \
                                        get_acl_data_length_cback)) == FALSE)
         {
-            bt_hc_cbacks->dealloc((TRANSAC) p_buf, (char *) (p_buf + 1));
+            bt_hc_cbacks->dealloc(p_buf);
         }
         else
             return;

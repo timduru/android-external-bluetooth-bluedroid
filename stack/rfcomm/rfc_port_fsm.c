@@ -31,6 +31,7 @@
 #include "port_api.h"
 #include "port_int.h"
 #include "rfc_int.h"
+#include "bt_utils.h"
 
 /********************************************************************************/
 /*              L O C A L    F U N C T I O N     P R O T O T Y P E S            */
@@ -61,7 +62,7 @@ void rfc_port_sm_execute (tPORT *p_port, UINT16 event, void *p_data)
 {
     if (!p_port)
     {
-        RFCOMM_TRACE_WARNING1 ("NULL port event %d", event);
+        RFCOMM_TRACE_WARNING ("NULL port event %d", event);
         return;
     }
 
@@ -155,11 +156,11 @@ void rfc_port_sm_state_closed (tPORT *p_port, UINT16 event, void *p_data)
 
     case RFC_EVENT_TIMEOUT:
         Port_TimeOutCloseMux( p_port->rfc.p_mcb ) ;
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
     }
 
-    RFCOMM_TRACE_WARNING1 ("Port state closed Event ignored %d", event);
+    RFCOMM_TRACE_WARNING ("Port state closed Event ignored %d", event);
     return;
 }
 
@@ -179,7 +180,7 @@ void rfc_port_sm_sabme_wait_ua (tPORT *p_port, UINT16 event, void *p_data)
     {
     case RFC_EVENT_OPEN:
     case RFC_EVENT_ESTABLISH_RSP:
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
 
     case RFC_EVENT_CLOSE:
@@ -229,7 +230,7 @@ void rfc_port_sm_sabme_wait_ua (tPORT *p_port, UINT16 event, void *p_data)
         PORT_DlcEstablishCnf (p_port->rfc.p_mcb, p_port->dlci, p_port->rfc.p_mcb->peer_l2cap_mtu, RFCOMM_ERROR);
         return;
     }
-    RFCOMM_TRACE_WARNING1 ("Port state sabme_wait_ua Event ignored %d", event);
+    RFCOMM_TRACE_WARNING ("Port state sabme_wait_ua Event ignored %d", event);
 }
 
 
@@ -269,7 +270,7 @@ void rfc_port_sm_term_wait_sec_check (tPORT *p_port, UINT16 event, void *p_data)
 
     case RFC_EVENT_OPEN:
     case RFC_EVENT_CLOSE:
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
 
     case RFC_EVENT_CLEAR:
@@ -278,7 +279,7 @@ void rfc_port_sm_term_wait_sec_check (tPORT *p_port, UINT16 event, void *p_data)
         return;
 
     case RFC_EVENT_DATA:
-        RFCOMM_TRACE_ERROR0 ("Port error state Term Wait Sec event Data");
+        RFCOMM_TRACE_ERROR ("Port error state Term Wait Sec event Data");
         GKI_freebuf (p_data);
         return;
 
@@ -311,7 +312,7 @@ void rfc_port_sm_term_wait_sec_check (tPORT *p_port, UINT16 event, void *p_data)
         }
         return;
     }
-    RFCOMM_TRACE_WARNING1 ("Port state term_wait_sec_check Event ignored %d", event);
+    RFCOMM_TRACE_WARNING ("Port state term_wait_sec_check Event ignored %d", event);
 }
 
 
@@ -345,7 +346,7 @@ void rfc_port_sm_orig_wait_sec_check (tPORT *p_port, UINT16 event, void *p_data)
 
     case RFC_EVENT_OPEN:
     case RFC_EVENT_SABME:       /* Peer should not use the same dlci */
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
 
     case RFC_EVENT_CLOSE:
@@ -354,7 +355,7 @@ void rfc_port_sm_orig_wait_sec_check (tPORT *p_port, UINT16 event, void *p_data)
         return;
 
     case RFC_EVENT_DATA:
-        RFCOMM_TRACE_ERROR0 ("Port error state Orig Wait Sec event Data");
+        RFCOMM_TRACE_ERROR ("Port error state Orig Wait Sec event Data");
         GKI_freebuf (p_data);
         return;
 
@@ -362,7 +363,7 @@ void rfc_port_sm_orig_wait_sec_check (tPORT *p_port, UINT16 event, void *p_data)
         GKI_freebuf (p_data);
         return;
     }
-    RFCOMM_TRACE_WARNING1 ("Port state orig_wait_sec_check Event ignored %d", event);
+    RFCOMM_TRACE_WARNING ("Port state orig_wait_sec_check Event ignored %d", event);
 }
 
 
@@ -381,7 +382,7 @@ void rfc_port_sm_opened (tPORT *p_port, UINT16 event, void *p_data)
     switch (event)
     {
     case RFC_EVENT_OPEN:
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
 
     case RFC_EVENT_CLOSE:
@@ -433,7 +434,7 @@ void rfc_port_sm_opened (tPORT *p_port, UINT16 event, void *p_data)
         if(p_port->rx.queue.count)
         {
             /* give a chance to upper stack to close port properly */
-            RFCOMM_TRACE_DEBUG0("port queue is not empty");
+            RFCOMM_TRACE_DEBUG("port queue is not empty");
             rfc_port_timer_start (p_port, RFC_DISC_TIMEOUT);
         }
         else
@@ -446,10 +447,10 @@ void rfc_port_sm_opened (tPORT *p_port, UINT16 event, void *p_data)
 
     case RFC_EVENT_TIMEOUT:
         Port_TimeOutCloseMux( p_port->rfc.p_mcb ) ;
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
     }
-    RFCOMM_TRACE_WARNING1 ("Port state opened Event ignored %d", event);
+    RFCOMM_TRACE_WARNING ("Port state opened Event ignored %d", event);
 }
 
 
@@ -469,7 +470,7 @@ void rfc_port_sm_disc_wait_ua (tPORT *p_port, UINT16 event, void *p_data)
     {
     case RFC_EVENT_OPEN:
     case RFC_EVENT_ESTABLISH_RSP:
-        RFCOMM_TRACE_ERROR2 ("Port error state %d event %d", p_port->rfc.state, event);
+        RFCOMM_TRACE_ERROR ("Port error state %d event %d", p_port->rfc.state, event);
         return;
 
     case RFC_EVENT_CLEAR:
@@ -506,7 +507,7 @@ void rfc_port_sm_disc_wait_ua (tPORT *p_port, UINT16 event, void *p_data)
         return;
     }
 
-    RFCOMM_TRACE_WARNING1 ("Port state disc_wait_ua Event ignored %d", event);
+    RFCOMM_TRACE_WARNING ("Port state disc_wait_ua Event ignored %d", event);
 }
 
 
@@ -547,7 +548,7 @@ void rfc_process_pn (tRFC_MCB *p_mcb, BOOLEAN is_command, MX_FRAME *p_frame)
         else
         {
             rfc_send_dm(p_mcb, dlci, FALSE);
-            RFCOMM_TRACE_WARNING0("***** MX PN while disconnecting *****");
+            RFCOMM_TRACE_WARNING("***** MX PN while disconnecting *****");
         }
 
         return;
@@ -795,6 +796,8 @@ void rfc_process_rls (tRFC_MCB *p_mcb, BOOLEAN is_command, MX_FRAME *p_frame)
 *******************************************************************************/
 void rfc_process_nsc (tRFC_MCB *p_mcb, MX_FRAME *p_frame)
 {
+    UNUSED(p_mcb);
+    UNUSED(p_frame);
 }
 
 
@@ -808,6 +811,8 @@ void rfc_process_nsc (tRFC_MCB *p_mcb, MX_FRAME *p_frame)
 *******************************************************************************/
 void rfc_process_test_rsp (tRFC_MCB *p_mcb, BT_HDR *p_buf)
 {
+    UNUSED(p_mcb);
+
     GKI_freebuf (p_buf);
 }
 

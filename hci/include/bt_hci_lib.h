@@ -20,6 +20,7 @@
 #define BT_HCI_LIB_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
@@ -57,6 +58,11 @@ typedef enum {
     BT_HC_LOGGING_ON,
 } bt_hc_logging_state_t;
 
+/* commands to be used in LSB with MSG_CTRL_TO_HC_CMD */
+typedef enum {
+    BT_HC_AUDIO_STATE = 0,
+    BT_HC_CMD_MAX
+} bt_hc_tx_cmd_t;
 /** Result of write request */
 typedef enum {
     BT_HC_TX_SUCCESS,  /* a buffer is fully processed and can be released */
@@ -115,7 +121,7 @@ typedef void (*lpm_result_cb)(bt_hc_lpm_request_result_t result);
 typedef char* (*alloc_mem_cb)(int size);
 
 /* datapath buffer deallocation callback (callout) */
-typedef int (*dealloc_mem_cb)(TRANSAC transac, char *p_buf);
+typedef void (*dealloc_mem_cb)(TRANSAC transac);
 
 /* transmit result callback */
 typedef int (*tx_result_cb)(TRANSAC transac, char *p_buf, bt_hc_transmit_result_t result);
@@ -181,14 +187,14 @@ typedef struct {
     /** Transmit buffer */
     int (*transmit_buf)(TRANSAC transac, char *p_buf, int len);
 
-    /** Controls receive flow */
-    int (*set_rxflow)(bt_rx_flow_state_t state);
-
     /** Controls HCI logging on/off */
-    int (*logging)(bt_hc_logging_state_t state, char *p_path);
+    int (*logging)(bt_hc_logging_state_t state, char *p_path, bool save_existing);
 
     /** Closes the interface */
     void  (*cleanup)( void );
+
+    /** sends commands to hc layer (e.g. SCO state) */
+    int   (*tx_cmd)(TRANSAC transac, char *p_buf, int len);
 } bt_hc_interface_t;
 
 

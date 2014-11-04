@@ -21,6 +21,7 @@
 #include "avrc_api.h"
 #include "avrc_defs.h"
 #include "avrc_int.h"
+#include "bt_utils.h"
 
 /*****************************************************************************
 **  Global data
@@ -39,7 +40,7 @@
 **                  Otherwise, the error code defined by AVRCP 1.4
 **
 *******************************************************************************/
-static tAVRC_STS avrc_pars_vendor_rsp(tAVRC_MSG_VENDOR *p_msg, tAVRC_RESPONSE *p_result, UINT8 *p_buf, UINT16 buf_len)
+static tAVRC_STS avrc_pars_vendor_rsp(tAVRC_MSG_VENDOR *p_msg, tAVRC_RESPONSE *p_result)
 {
     tAVRC_STS  status = AVRC_STS_NO_ERROR;
     UINT8   *p = p_msg->p_vendor_data;
@@ -57,7 +58,7 @@ static tAVRC_STS avrc_pars_vendor_rsp(tAVRC_MSG_VENDOR *p_msg, tAVRC_RESPONSE *p
     BE_STREAM_TO_UINT8 (p_result->pdu, p);
     p++; /* skip the reserved/packe_type byte */
     BE_STREAM_TO_UINT16 (len, p);
-    AVRC_TRACE_DEBUG4("avrc_pars_vendor_rsp() ctype:0x%x pdu:0x%x, len:%d/0x%x", p_msg->hdr.ctype, p_result->pdu, len, len);
+    AVRC_TRACE_DEBUG("avrc_pars_vendor_rsp() ctype:0x%x pdu:0x%x, len:%d/0x%x", p_msg->hdr.ctype, p_result->pdu, len, len);
     if (p_msg->hdr.ctype == AVRC_RSP_REJ)
     {
         p_result->rsp.status = *p;
@@ -91,7 +92,7 @@ static tAVRC_STS avrc_pars_vendor_rsp(tAVRC_MSG_VENDOR *p_msg, tAVRC_RESPONSE *p
             p_result->reg_notif.event_id=eventid;
             BE_STREAM_TO_UINT8 (p_result->reg_notif.param.volume, p);
         }
-        AVRC_TRACE_DEBUG2("avrc_pars_vendor_rsp PDU reg notif response:event %x, volume %x",eventid,
+        AVRC_TRACE_DEBUG("avrc_pars_vendor_rsp PDU reg notif response:event %x, volume %x",eventid,
             p_result->reg_notif.param.volume);
 #endif /* (AVRC_ADV_CTRL_INCLUDED == TRUE) */
         break;
@@ -117,13 +118,15 @@ tAVRC_STS AVRC_ParsResponse (tAVRC_MSG *p_msg, tAVRC_RESPONSE *p_result, UINT8 *
 {
     tAVRC_STS  status = AVRC_STS_INTERNAL_ERR;
     UINT16  id;
+    UNUSED(p_buf);
+    UNUSED(buf_len);
 
     if (p_msg && p_result)
     {
         switch (p_msg->hdr.opcode)
         {
         case AVRC_OP_VENDOR:     /*  0x00    Vendor-dependent commands */
-            status = avrc_pars_vendor_rsp(&p_msg->vendor, p_result, p_buf, buf_len);
+            status = avrc_pars_vendor_rsp(&p_msg->vendor, p_result);
             break;
 
         case AVRC_OP_PASS_THRU:  /*  0x7C    panel subunit opcode */
@@ -135,11 +138,11 @@ tAVRC_STS AVRC_ParsResponse (tAVRC_MSG *p_msg, tAVRC_RESPONSE *p_result, UINT8 *
             break;
 
         default:
-            AVRC_TRACE_ERROR1("AVRC_ParsResponse() unknown opcode:0x%x", p_msg->hdr.opcode);
+            AVRC_TRACE_ERROR("AVRC_ParsResponse() unknown opcode:0x%x", p_msg->hdr.opcode);
             break;
         }
         p_result->rsp.opcode = p_msg->hdr.opcode;
-    p_result->rsp.status = status;
+        p_result->rsp.status = status;
     }
     return status;
 }

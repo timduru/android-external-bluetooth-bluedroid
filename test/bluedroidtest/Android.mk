@@ -22,18 +22,21 @@ LOCAL_SRC_FILES:=     \
     bluedroidtest.c
 
 LOCAL_C_INCLUDES :=
+LOCAL_CFLAGS := -Wno-unused-parameter
+
+LOCAL_CFLAGS += -std=c99
+
+LOCAL_CFLAGS += -std=c99
 
 LOCAL_MODULE_TAGS := eng
 
 LOCAL_MODULE:= bdt
-
-LOCAL_LDLIBS += -lpthread -ldl -llog -lreadline
-LIBS_c += -lreadline
 
 LOCAL_SHARED_LIBRARIES += libcutils   \
                           libutils    \
                           libhardware \
                           libhardware_legacy
 
-include $(BUILD_EXECUTABLE)
+LOCAL_MULTILIB := 32
 
+include $(BUILD_EXECUTABLE)

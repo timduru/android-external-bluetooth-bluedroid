@@ -25,6 +25,7 @@
 #include <string.h>
 #include "data_types.h"
 #include "bt_target.h"
+#include "bt_utils.h"
 #include "avdt_api.h"
 #include "avdtc_api.h"
 #include "avdt_int.h"
@@ -55,7 +56,7 @@ UINT8 avdt_ad_type_to_tcid(UINT8 type, tAVDT_SCB *p_scb)
     {
         scb_idx = avdt_scb_to_hdl(p_scb) - 1;
         /*
-        AVDT_TRACE_DEBUG2("type: %d, tcid: %d", type, ((scb_idx * (AVDT_CHAN_NUM_TYPES - 1)) + type));
+        AVDT_TRACE_DEBUG("type: %d, tcid: %d", type, ((scb_idx * (AVDT_CHAN_NUM_TYPES - 1)) + type));
         */
         return ((scb_idx * (AVDT_CHAN_NUM_TYPES - 1)) + type);
     }
@@ -88,7 +89,7 @@ static UINT8 avdt_ad_tcid_to_type(UINT8 tcid)
         */
         type = ((tcid + AVDT_CHAN_NUM_TYPES - 2) % (AVDT_CHAN_NUM_TYPES - 1)) + 1;
     }
-    AVDT_TRACE_DEBUG2("tcid: %d, type: %d", tcid, type);
+    AVDT_TRACE_DEBUG("tcid: %d, type: %d", tcid, type);
     return type;
 }
 
@@ -298,7 +299,7 @@ tAVDT_TC_TBL *avdt_ad_tc_tbl_alloc(tAVDT_CCB *p_ccb)
 *******************************************************************************/
 UINT8 avdt_ad_tc_tbl_to_idx(tAVDT_TC_TBL *p_tbl)
 {
-    AVDT_TRACE_DEBUG1("avdt_ad_tc_tbl_to_idx: %d", (p_tbl - avdt_cb.ad.tc_tbl));
+    AVDT_TRACE_DEBUG("avdt_ad_tc_tbl_to_idx: %d", (p_tbl - avdt_cb.ad.tc_tbl));
     /* use array arithmetic to determine index */
     return (UINT8) (p_tbl - avdt_cb.ad.tc_tbl);
 }
@@ -322,6 +323,7 @@ void avdt_ad_tc_close_ind(tAVDT_TC_TBL *p_tbl, UINT16 reason)
     tAVDT_CCB   *p_ccb;
     tAVDT_SCB   *p_scb;
     tAVDT_SCB_TC_CLOSE  close;
+    UNUSED(reason);
 
     close.old_tc_state = p_tbl->state;
     /* clear avdt_ad_tc_tbl entry */
@@ -329,7 +331,7 @@ void avdt_ad_tc_close_ind(tAVDT_TC_TBL *p_tbl, UINT16 reason)
     p_tbl->cfg_flags = 0;
     p_tbl->peer_mtu = L2CAP_DEFAULT_MTU;
 
-    AVDT_TRACE_DEBUG2("avdt_ad_tc_close_ind tcid: %d, old: %d",
+    AVDT_TRACE_DEBUG("avdt_ad_tc_close_ind tcid: %d, old: %d",
         p_tbl->tcid, close.old_tc_state);
     /* if signaling channel, notify ccb that channel open */
     if (p_tbl->tcid == 0)
@@ -480,7 +482,10 @@ void avdt_ad_tc_data_ind(tAVDT_TC_TBL *p_tbl, BT_HDR *p_buf)
             avdt_scb_event(p_scb, AVDT_SCB_TC_DATA_EVT, (tAVDT_SCB_EVT *) &p_buf);
         }
         else
+        {
             GKI_freebuf(p_buf);
+            AVDT_TRACE_ERROR(" avdt_ad_tc_data_ind buffer freed");
+        }
     }
 }
 
@@ -535,7 +540,7 @@ void avdt_ad_open_req(UINT8 type, tAVDT_CCB *p_ccb, tAVDT_SCB *p_scb, UINT8 role
     p_tbl = avdt_ad_tc_tbl_alloc(p_ccb);
 
     p_tbl->tcid = avdt_ad_type_to_tcid(type, p_scb);
-    AVDT_TRACE_DEBUG3("avdt_ad_open_req: type: %d, role: %d, tcid:%d",
+    AVDT_TRACE_DEBUG("avdt_ad_open_req: type: %d, role: %d, tcid:%d",
         type, role, p_tbl->tcid);
 
     if (type == AVDT_CHAN_SIG)
@@ -552,7 +557,7 @@ void avdt_ad_open_req(UINT8 type, tAVDT_CCB *p_ccb, tAVDT_SCB *p_scb, UINT8 role
 
         /* also set scb_hdl in rt_tbl */
         avdt_cb.ad.rt_tbl[avdt_ccb_to_idx(p_ccb)][p_tbl->tcid].scb_hdl = avdt_scb_to_hdl(p_scb);
-        AVDT_TRACE_DEBUG3("avdt_cb.ad.rt_tbl[%d][%d].scb_hdl = %d",
+        AVDT_TRACE_DEBUG("avdt_cb.ad.rt_tbl[%d][%d].scb_hdl = %d",
             avdt_ccb_to_idx(p_ccb), p_tbl->tcid,
             avdt_scb_to_hdl(p_scb));
     }
@@ -572,11 +577,11 @@ void avdt_ad_open_req(UINT8 type, tAVDT_CCB *p_ccb, tAVDT_SCB *p_scb, UINT8 role
         {
             /* if connect req ok, store tcid in lcid table  */
             avdt_cb.ad.lcid_tbl[lcid - L2CAP_BASE_APPL_CID] = avdt_ad_tc_tbl_to_idx(p_tbl);
-            AVDT_TRACE_DEBUG2("avdt_cb.ad.lcid_tbl[%d] = %d",
+            AVDT_TRACE_DEBUG("avdt_cb.ad.lcid_tbl[%d] = %d",
                 (lcid - L2CAP_BASE_APPL_CID), avdt_ad_tc_tbl_to_idx(p_tbl));
 
             avdt_cb.ad.rt_tbl[avdt_ccb_to_idx(p_ccb)][p_tbl->tcid].lcid = lcid;
-            AVDT_TRACE_DEBUG3("avdt_cb.ad.rt_tbl[%d][%d].lcid = 0x%x",
+            AVDT_TRACE_DEBUG("avdt_cb.ad.rt_tbl[%d][%d].lcid = 0x%x",
                 avdt_ccb_to_idx(p_ccb), p_tbl->tcid,
                 lcid);
         }
@@ -606,7 +611,7 @@ void avdt_ad_close_req(UINT8 type, tAVDT_CCB *p_ccb, tAVDT_SCB *p_scb)
     tAVDT_TC_TBL    *p_tbl;
 
     p_tbl = avdt_ad_tc_tbl_by_type(type, p_ccb, p_scb);
-    AVDT_TRACE_DEBUG1("avdt_ad_close_req state: %d", p_tbl->state);
+    AVDT_TRACE_DEBUG("avdt_ad_close_req state: %d", p_tbl->state);
 
     switch(p_tbl->state)
     {

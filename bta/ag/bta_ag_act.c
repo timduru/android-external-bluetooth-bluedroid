@@ -244,7 +244,7 @@ void bta_ag_disc_int_res(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
     UINT16 event = BTA_AG_DISC_FAIL_EVT;
 
-    APPL_TRACE_DEBUG1 ("bta_ag_disc_int_res: Status: %d", p_data->disc_result.status);
+    APPL_TRACE_DEBUG ("bta_ag_disc_int_res: Status: %d", p_data->disc_result.status);
 
     /* if found service */
     if (p_data->disc_result.status == SDP_SUCCESS ||
@@ -334,6 +334,8 @@ void bta_ag_disc_acp_res(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 *******************************************************************************/
 void bta_ag_disc_fail(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_data);
+
     /* reopen registered servers */
     bta_ag_start_servers(p_scb, p_scb->reg_services);
 
@@ -371,6 +373,8 @@ void bta_ag_open_fail(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 *******************************************************************************/
 void bta_ag_rfc_fail(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
+    UNUSED(p_data);
+
     /* reinitialize stuff */
     p_scb->conn_handle = 0;
     p_scb->conn_service = 0;
@@ -402,9 +406,10 @@ void bta_ag_rfc_fail(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 *******************************************************************************/
 void bta_ag_rfc_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
-    tBTA_AG_HDR    close;
+    tBTA_AG_CLOSE    close;
     tBTA_SERVICE_MASK services;
     int i, num_active_conn = 0;
+    UNUSED(p_data);
 
 #ifdef  _WIN32_WCE
     /* The BTE RFCOMM automatically removes the connection when closed, but BTW does not */
@@ -418,6 +423,10 @@ void bta_ag_rfc_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 #if (BTM_WBS_INCLUDED == TRUE )
     p_scb->peer_codecs = BTA_AG_CODEC_NONE;
     p_scb->sco_codec = BTA_AG_CODEC_NONE;
+    /* Clear these flags upon SLC teardown */
+    p_scb->codec_updated = FALSE;
+    p_scb->codec_fallback = FALSE;
+    p_scb->codec_msbc_settings = BTA_AG_SCO_MSBC_SETTINGS_T2;
 #endif
     p_scb->role = 0;
     p_scb->post_sco = BTA_AG_POST_SCO_NONE;
@@ -431,13 +440,14 @@ void bta_ag_rfc_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
     bta_sys_stop_timer(&p_scb->cn_timer);
 #endif
 
-    close.handle = bta_ag_scb_to_idx(p_scb);
-    close.app_id = p_scb->app_id;
+    close.hdr.handle = bta_ag_scb_to_idx(p_scb);
+    close.hdr.app_id = p_scb->app_id;
+    bdcpy(close.bd_addr, p_scb->peer_addr);
 
     bta_sys_conn_close(BTA_ID_AG, p_scb->app_id, p_scb->peer_addr);
 
     /* call close call-out */
-    bta_ag_co_data_close(close.handle);
+    bta_ag_co_data_close(close.hdr.handle);
 
     /* call close cback */
     (*bta_ag_cb.p_cback)(BTA_AG_CLOSE_EVT, (tBTA_AG *) &close);
@@ -550,13 +560,13 @@ void bta_ag_rfc_acp_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
     /* set role */
     p_scb->role = BTA_AG_ACP;
 
-    APPL_TRACE_DEBUG2 ("bta_ag_rfc_acp_open: serv_handle0 = %d serv_handle1 = %d",
+    APPL_TRACE_DEBUG ("bta_ag_rfc_acp_open: serv_handle0 = %d serv_handle1 = %d",
                        p_scb->serv_handle[0], p_scb->serv_handle[1]);
 
     /* get bd addr of peer */
     if (PORT_SUCCESS != (status=PORT_CheckConnection(p_data->rfc.port_handle, dev_addr, &lcid)))
     {
-        APPL_TRACE_DEBUG1 ("bta_ag_rfc_acp_open error PORT_CheckConnection returned status %d", status);
+        APPL_TRACE_DEBUG ("bta_ag_rfc_acp_open error PORT_CheckConnection returned status %d", status);
     }
 
     /* Collision Handling */
@@ -596,7 +606,7 @@ void bta_ag_rfc_acp_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
     /* determine connected service from port handle */
     for (i = 0; i < BTA_AG_NUM_IDX; i++)
     {
-        APPL_TRACE_DEBUG3 ("bta_ag_rfc_acp_open: i = %d serv_handle = %d port_handle = %d",
+        APPL_TRACE_DEBUG ("bta_ag_rfc_acp_open: i = %d serv_handle = %d port_handle = %d",
                            i, p_scb->serv_handle[i], p_data->rfc.port_handle);
 
         if (p_scb->serv_handle[i] == p_data->rfc.port_handle)
@@ -607,7 +617,7 @@ void bta_ag_rfc_acp_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
         }
     }
 
-    APPL_TRACE_DEBUG2 ("bta_ag_rfc_acp_open: conn_service = %d conn_handle = %d",
+    APPL_TRACE_DEBUG ("bta_ag_rfc_acp_open: conn_service = %d conn_handle = %d",
                        p_scb->conn_service, p_scb->conn_handle);
 
     /* close any unopened server */
@@ -637,6 +647,7 @@ void bta_ag_rfc_data(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
     UINT16  len;
     char    buf[BTA_AG_RFC_READ_MAX];
+    UNUSED(p_data);
 
     memset(buf, 0, BTA_AG_RFC_READ_MAX);
 
@@ -796,6 +807,7 @@ void bta_ag_post_sco_close(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 void bta_ag_svc_conn_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
     tBTA_AG_CONN evt;
+    UNUSED(p_data);
 
     if (!p_scb->svc_conn)
     {
@@ -812,6 +824,7 @@ void bta_ag_svc_conn_open(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
         evt.hdr.handle = bta_ag_scb_to_idx(p_scb);
         evt.hdr.app_id = p_scb->app_id;
         evt.peer_feat = p_scb->peer_features;
+        bdcpy(evt.bd_addr, p_scb->peer_addr);
 #if (BTM_WBS_INCLUDED == TRUE )
         evt.peer_codec  = p_scb->peer_codecs;
 #endif
@@ -856,12 +869,62 @@ void bta_ag_ci_rx_data(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 *******************************************************************************/
 void bta_ag_rcvd_slc_ready(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
 {
-    APPL_TRACE_DEBUG1("bta_ag_rcvd_slc_ready: handle = %d", bta_ag_scb_to_idx(p_scb));
+    UNUSED(p_data);
+
+    APPL_TRACE_DEBUG("bta_ag_rcvd_slc_ready: handle = %d", bta_ag_scb_to_idx(p_scb));
 
     if (bta_ag_cb.parse_mode == BTA_AG_PASS_THROUGH)
     {
         /* In pass-through mode, BTA knows that SLC is ready only through call-in. */
         bta_ag_svc_conn_open(p_scb, NULL);
     }
+}
+
+/*******************************************************************************
+**
+** Function         bta_ag_setcodec
+**
+** Description      Handle API SetCodec
+**
+**
+** Returns          void
+**
+*******************************************************************************/
+void bta_ag_setcodec(tBTA_AG_SCB *p_scb, tBTA_AG_DATA *p_data)
+{
+#if (BTM_WBS_INCLUDED == TRUE )
+    tBTA_AG_PEER_CODEC codec_type = p_data->api_setcodec.codec;
+    tBTA_AG_VAL        val;
+
+    /* Check if the requested codec type is valid */
+    if((codec_type != BTA_AG_CODEC_NONE) &&
+       (codec_type != BTA_AG_CODEC_CVSD) &&
+       (codec_type != BTA_AG_CODEC_MSBC))
+    {
+        val.num = codec_type;
+        val.hdr.status = BTA_AG_FAIL_RESOURCES;
+        APPL_TRACE_ERROR("bta_ag_setcodec error: unsupported codec type %d", codec_type);
+        (*bta_ag_cb.p_cback)(BTA_AG_WBS_EVT, (tBTA_AG *) &val);
+        return;
+    }
+
+    if((p_scb->peer_codecs & codec_type) || (codec_type == BTA_AG_CODEC_NONE) ||
+        (codec_type == BTA_AG_CODEC_CVSD))
+    {
+        p_scb->sco_codec = codec_type;
+        p_scb->codec_updated = TRUE;
+        val.num = codec_type;
+        val.hdr.status = BTA_AG_SUCCESS;
+        APPL_TRACE_DEBUG("bta_ag_setcodec: Updated codec type %d", codec_type);
+    }
+    else
+    {
+        val.num = codec_type;
+        val.hdr.status = BTA_AG_FAIL_RESOURCES;
+        APPL_TRACE_ERROR("bta_ag_setcodec error: unsupported codec type %d", codec_type);
+    }
+
+    (*bta_ag_cb.p_cback)(BTA_AG_WBS_EVT, (tBTA_AG *) &val);
+#endif
 }
 

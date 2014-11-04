@@ -31,6 +31,9 @@
 **  Constants and data types
 *****************************************************************************/
 
+/* vendor specific event handler function type */
+typedef BOOLEAN (tBTA_SYS_VS_EVT_HDLR)(UINT16 evt, void *p);
+
 /* event handler function type */
 typedef BOOLEAN (tBTA_SYS_EVT_HDLR)(BT_HDR *p_msg);
 
@@ -300,6 +303,7 @@ extern void bta_sys_set_policy (UINT8 id, UINT8 policy, BD_ADDR peer_addr);
 extern void bta_sys_clear_policy (UINT8 id, UINT8 policy, BD_ADDR peer_addr);
 extern void bta_sys_set_default_policy (UINT8 id, UINT8 policy);
 extern void bta_sys_clear_default_policy (UINT8 id, UINT8 policy);
+extern BOOLEAN bta_sys_vs_hdl(UINT16 evt, void *p);
 
 #ifdef __cplusplus
 }

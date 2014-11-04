@@ -23,11 +23,13 @@
  *
  ******************************************************************************/
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
 
+#include "config.h"
 #include "gki.h"
 #include "bte.h"
 
@@ -206,13 +208,13 @@ const char * const bt_layer_tags[] = {
 //#define DBG_TRACE
 
 #if defined( DBG_TRACE )
-#define DBG_TRACE_API0( m ) BT_TRACE_0( TRACE_LAYER_HCI, TRACE_TYPE_API, m )
-#define DBG_TRACE_WARNING2( m, p0, p1 ) BT_TRACE_2( TRACE_LAYER_BTM, (TRACE_ORG_APPL|TRACE_TYPE_WARNING), m, p0, p1 )
+#define DBG_TRACE_API0( m ) BT_TRACE( TRACE_LAYER_HCI, TRACE_TYPE_API, m )
+#define DBG_TRACE_WARNING2( m, p0, p1 ) BT_TRACE( TRACE_LAYER_BTM, (TRACE_ORG_APPL|TRACE_TYPE_WARNING), m, p0, p1 )
 #else
 #define DBG_TRACE_API0( m )
 #define DBG_TRACE_WARNING2( m, p0, p1 )
 #endif
-#define DBG_TRACE_DEBUG2( m, p0, p1 ) BT_TRACE_2( TRACE_LAYER_BTM, (TRACE_ORG_APPL|TRACE_TYPE_DEBUG), m, p0, p1 )
+#define DBG_TRACE_DEBUG2( m, p0, p1 ) BT_TRACE( TRACE_LAYER_BTM, (TRACE_ORG_APPL|TRACE_TYPE_DEBUG), m, p0, p1 )
 
 void
 LogMsg(UINT32 trace_set_mask, const char *fmt_str, ...)
@@ -329,7 +331,7 @@ BTU_API UINT8 BTU_SetTraceLevel( UINT8 new_level )
 
 BOOLEAN trace_conf_enabled = FALSE;
 
-void bte_trace_conf(char *p_conf_name, char *p_conf_value)
+void bte_trace_conf(const char *p_conf_name, const char *p_conf_value)
 {
     tBTTRC_FUNC_MAP *p_f_map = (tBTTRC_FUNC_MAP *) &bttrc_set_level_map[0];
 
@@ -342,6 +344,16 @@ void bte_trace_conf(char *p_conf_name, char *p_conf_value)
         }
         p_f_map++;
     }
+}
+
+void bte_trace_conf_config(const config_t *config) {
+  assert(config != NULL);
+
+  for (tBTTRC_FUNC_MAP *functions = &bttrc_set_level_map[0]; functions->trc_name; ++functions) {
+    int value = config_get_int(config, CONFIG_DEFAULT_SECTION, functions->trc_name, -1);
+    if (value != -1)
+      functions->trace_level = value;
+  }
 }
 
 /********************************************************************************
@@ -525,122 +537,4 @@ BT_API void BTE_InitTraceLevels( void )
         ALOGI("[bttrc] using compile default trace settings");
     }
 #endif
-}
-
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_0
- **
- **    Purpose:  Encodes a trace message that has no parameter arguments
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_0(UINT32 trace_set_mask, const char *fmt_str) {
-    LogMsg(trace_set_mask, fmt_str);
-}
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_1
- **
- **    Purpose:  Encodes a trace message that has one parameter argument
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_1(UINT32 trace_set_mask, const char *fmt_str, UINT32 p1) {
-
-    LogMsg(trace_set_mask, fmt_str, p1);
-}
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_2
- **
- **    Purpose:  Encodes a trace message that has two parameter arguments
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_2(UINT32 trace_set_mask, const char *fmt_str, UINT32 p1, UINT32 p2) {
-    LogMsg(trace_set_mask, fmt_str, p1, p2);
-}
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_3
- **
- **    Purpose:  Encodes a trace message that has three parameter arguments
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_3(UINT32 trace_set_mask, const char *fmt_str, UINT32 p1, UINT32 p2,
-        UINT32 p3) {
-    LogMsg(trace_set_mask, fmt_str, p1, p2, p3);
-}
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_4
- **
- **    Purpose:  Encodes a trace message that has four parameter arguments
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_4(UINT32 trace_set_mask, const char *fmt_str, UINT32 p1, UINT32 p2,
-        UINT32 p3, UINT32 p4) {
-    LogMsg(trace_set_mask, fmt_str, p1, p2, p3, p4);
-}
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_5
- **
- **    Purpose:  Encodes a trace message that has five parameter arguments
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_5(UINT32 trace_set_mask, const char *fmt_str, UINT32 p1, UINT32 p2,
-        UINT32 p3, UINT32 p4, UINT32 p5) {
-    LogMsg(trace_set_mask, fmt_str, p1, p2, p3, p4, p5);
-}
-
-/********************************************************************************
- **
- **    Function Name:   LogMsg_6
- **
- **    Purpose:  Encodes a trace message that has six parameter arguments
- **
- **    Input Parameters:  trace_set_mask: tester trace type.
- **                       fmt_str: displayable string.
- **    Returns:
- **                      Nothing.
- **
- *********************************************************************************/
-void LogMsg_6(UINT32 trace_set_mask, const char *fmt_str, UINT32 p1, UINT32 p2,
-        UINT32 p3, UINT32 p4, UINT32 p5, UINT32 p6) {
-    LogMsg(trace_set_mask, fmt_str, p1, p2, p3, p4, p5, p6);
 }

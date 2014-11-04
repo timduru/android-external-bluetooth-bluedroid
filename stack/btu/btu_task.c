@@ -39,6 +39,7 @@
 #include "l2c_int.h"
 #include "btu.h"
 #include "bt_utils.h"
+#include <sys/prctl.h>
 
 #include "sdpint.h"
 
@@ -166,10 +167,11 @@ BTU_API UINT32 btu_task (UINT32 param)
     UINT8            i;
     UINT16           mask;
     BOOLEAN          handled;
+    UNUSED(param);
 
 #if (defined(HCISU_H4_INCLUDED) && HCISU_H4_INCLUDED == TRUE)
     /* wait an event that HCISU is ready */
-    BT_TRACE_0(TRACE_LAYER_BTU, TRACE_TYPE_API,
+    BT_TRACE(TRACE_LAYER_BTU, TRACE_TYPE_API,
                 "btu_task pending for preload complete event");
 
     for (;;)
@@ -178,7 +180,7 @@ BTU_API UINT32 btu_task (UINT32 param)
         if (event & EVENT_MASK(GKI_SHUTDOWN_EVT))
         {
             /* indicates BT ENABLE abort */
-            BT_TRACE_0(TRACE_LAYER_BTU, TRACE_TYPE_WARNING,
+            BT_TRACE(TRACE_LAYER_BTU, TRACE_TYPE_WARNING,
                         "btu_task start abort!");
             return (0);
         }
@@ -188,13 +190,13 @@ BTU_API UINT32 btu_task (UINT32 param)
         }
         else
         {
-            BT_TRACE_1(TRACE_LAYER_BTU, TRACE_TYPE_WARNING,
+            BT_TRACE(TRACE_LAYER_BTU, TRACE_TYPE_WARNING,
                 "btu_task ignore evt %04x while pending for preload complete",
                 event);
         }
     }
 
-    BT_TRACE_0(TRACE_LAYER_BTU, TRACE_TYPE_API,
+    BT_TRACE(TRACE_LAYER_BTU, TRACE_TYPE_API,
                 "btu_task received preload complete event");
 #endif
 
@@ -219,6 +221,8 @@ BTU_API UINT32 btu_task (UINT32 param)
 
     /* Send a startup evt message to BTIF_TASK to kickstart the init procedure */
     GKI_send_event(BTIF_TASK, BT_EVT_TRIGGER_STACK_INIT);
+
+    prctl(PR_SET_NAME, (unsigned long)"BTU TASK", 0, 0, 0);
 
     raise_priority_a2dp(TASK_HIGH_BTU);
 
@@ -330,9 +334,28 @@ BTU_API UINT32 btu_task (UINT32 param)
                         break;
 
                     case BT_EVT_TO_STOP_TIMER:
-                        if (btu_cb.timer_queue.p_first == NULL)
-                        {
+                        if (GKI_timer_queue_is_empty(&btu_cb.timer_queue)) {
                             GKI_stop_timer(TIMER_0);
+                        }
+                        GKI_freebuf (p_msg);
+                        break;
+
+                    case BT_EVT_TO_START_TIMER_ONESHOT:
+                        if (!GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+                            TIMER_LIST_ENT *tle = GKI_timer_getfirst(&btu_cb.timer_queue_oneshot);
+                            // Start non-repeating timer.
+                            GKI_start_timer(TIMER_3, tle->ticks, FALSE);
+                        } else {
+                            BTM_TRACE_WARNING("Oneshot timer queue empty when received start request");
+                        }
+                        GKI_freebuf(p_msg);
+                        break;
+
+                    case BT_EVT_TO_STOP_TIMER_ONESHOT:
+                        if (GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+                            GKI_stop_timer(TIMER_3);
+                        } else {
+                            BTM_TRACE_WARNING("Oneshot timer queue not empty when received stop request");
                         }
                         GKI_freebuf (p_msg);
                         break;
@@ -373,19 +396,17 @@ BTU_API UINT32 btu_task (UINT32 param)
         }
 
 
-        if (event & TIMER_0_EVT_MASK)
-        {
-            TIMER_LIST_ENT  *p_tle;
-
+        if (event & TIMER_0_EVT_MASK) {
             GKI_update_timer_list (&btu_cb.timer_queue, 1);
 
-            while ((btu_cb.timer_queue.p_first) && (!btu_cb.timer_queue.p_first->ticks))
-            {
-                p_tle = btu_cb.timer_queue.p_first;
-                GKI_remove_from_timer_list (&btu_cb.timer_queue, p_tle);
+            while (!GKI_timer_queue_is_empty(&btu_cb.timer_queue)) {
+                TIMER_LIST_ENT *p_tle = GKI_timer_getfirst(&btu_cb.timer_queue);
+                if (p_tle->ticks != 0)
+                    break;
 
-                switch (p_tle->event)
-                {
+                GKI_remove_from_timer_list(&btu_cb.timer_queue, p_tle);
+
+                switch (p_tle->event) {
                     case BTU_TTYPE_BTM_DEV_CTL:
                         btm_dev_timeout(p_tle);
                         break;
@@ -399,7 +420,6 @@ BTU_API UINT32 btu_task (UINT32 param)
                     case BTU_TTYPE_L2CAP_HOLD:
                     case BTU_TTYPE_L2CAP_INFO:
                     case BTU_TTYPE_L2CAP_FCR_ACK:
-
                         l2c_process_timeout (p_tle);
                         break;
 
@@ -471,7 +491,8 @@ BTU_API UINT32 btu_task (UINT32 param)
 #if (defined(BLE_INCLUDED) && BLE_INCLUDED == TRUE)
                     case BTU_TTYPE_BLE_INQUIRY:
                     case BTU_TTYPE_BLE_GAP_LIM_DISC:
-                    case BTU_TTYPE_BLE_RANDOM_ADDR:
+                    case BTU_TTYPE_BLE_GAP_FAST_ADV:
+                    case BTU_TTYPE_BLE_OBSERVE:
                         btm_ble_timeout(p_tle);
                         break;
 
@@ -559,6 +580,53 @@ BTU_API UINT32 btu_task (UINT32 param)
         }
 #endif
 
+        if (event & TIMER_3_EVT_MASK) {
+            BTM_TRACE_API("Received oneshot timer event complete");
+            if (!GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+                TIMER_LIST_ENT *p_tle = GKI_timer_getfirst(&btu_cb.timer_queue_oneshot);
+                INT32 ticks_since_last_update = GKI_timer_ticks_getinitial(GKI_timer_getfirst(&btu_cb.timer_queue_oneshot));
+                GKI_update_timer_list(&btu_cb.timer_queue_oneshot, ticks_since_last_update);
+            }
+
+            while (!GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+                TIMER_LIST_ENT *p_tle = GKI_timer_getfirst(&btu_cb.timer_queue_oneshot);
+                if (p_tle->ticks != 0)
+                    break;
+
+                GKI_remove_from_timer_list(&btu_cb.timer_queue_oneshot, p_tle);
+
+                switch (p_tle->event) {
+#if (defined(BLE_INCLUDED) && BLE_INCLUDED == TRUE)
+                    case BTU_TTYPE_BLE_RANDOM_ADDR:
+                        btm_ble_timeout(p_tle);
+                        break;
+#endif
+
+                    case BTU_TTYPE_USER_FUNC:
+                        {
+                            tUSER_TIMEOUT_FUNC  *p_uf = (tUSER_TIMEOUT_FUNC *)p_tle->param;
+                            (*p_uf)(p_tle);
+                        }
+                        break;
+
+                    default:
+                        // FAIL
+                        BTM_TRACE_WARNING("Received unexpected oneshot timer event:0x%x\n",
+                            p_tle->event);
+                        break;
+                }
+            }
+
+            /* Update GKI timer with new tick value from first timer. */
+            if (!GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+                TIMER_LIST_ENT *p_tle = GKI_timer_getfirst(&btu_cb.timer_queue_oneshot);
+                if (p_tle->ticks > 0)
+                  GKI_start_timer(TIMER_3, p_tle->ticks, FALSE);
+            } else {
+                GKI_stop_timer(TIMER_3);
+            }
+        }
+
         if (event & EVENT_MASK(APPL_EVT_7))
             break;
     }
@@ -604,7 +672,8 @@ void btu_start_timer (TIMER_LIST_ENT *p_tle, UINT16 type, UINT32 timeout)
     GKI_remove_from_timer_list (&btu_cb.timer_queue, p_tle);
 
     p_tle->event = type;
-    p_tle->ticks = timeout;         /* Save the number of seconds for the timer */
+    p_tle->ticks = timeout;
+    p_tle->ticks_initial = timeout;
 
     GKI_add_to_timer_list (&btu_cb.timer_queue, p_tle);
     GKI_enable();
@@ -699,7 +768,8 @@ void btu_start_quick_timer (TIMER_LIST_ENT *p_tle, UINT16 type, UINT32 timeout)
     GKI_remove_from_timer_list (&btu_cb.quick_timer_queue, p_tle);
 
     p_tle->event = type;
-    p_tle->ticks = timeout; /* Save the number of ticks for the timer */
+    p_tle->ticks = timeout;
+    p_tle->ticks_initial = timeout;
 
     GKI_add_to_timer_list (&btu_cb.quick_timer_queue, p_tle);
     GKI_enable();
@@ -782,84 +852,59 @@ void process_quick_timer_evt(TIMER_LIST_Q *p_tlq)
 }
 #endif /* defined(QUICK_TIMER_TICKS_PER_SEC) && (QUICK_TIMER_TICKS_PER_SEC > 0) */
 
+/*
+ * Starts a oneshot timer with a timeout in seconds.
+ */
+void btu_start_timer_oneshot(TIMER_LIST_ENT *p_tle, UINT16 type, UINT32 timeout_in_secs) {
+    INT32 timeout_in_ticks = GKI_SECS_TO_TICKS(timeout_in_secs);
+    BTM_TRACE_DEBUG("Starting oneshot timer type:%d timeout:%ds", type, timeout_in_secs);
+    GKI_disable();
+    if (GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+    }
 
+    GKI_remove_from_timer_list(&btu_cb.timer_queue_oneshot, p_tle);
 
-void btu_register_timer (TIMER_LIST_ENT *p_tle, UINT16 type, UINT32 timeout, tBTU_TIMER_CALLBACK timer_cb)
-{
-    UINT8 i = 0;
-    INT8  first = -1;
-    for (; i < BTU_MAX_REG_TIMER; i++)
-    {
-        if (btu_cb.timer_reg[i].p_tle == NULL && first < 0)
-            first = i;
-        if (btu_cb.timer_reg[i].p_tle == p_tle)
-        {
-            btu_cb.timer_reg[i].timer_cb = timer_cb;
-            btu_start_timer(p_tle, type, timeout);
-            first = -1;
-            break;
+    p_tle->event = type;
+    p_tle->ticks = timeout_in_ticks;
+    p_tle->ticks_initial = timeout_in_ticks;
+
+    GKI_add_to_timer_list(&btu_cb.timer_queue_oneshot, p_tle);
+    /* RPC to BTU thread if timer start request from non-BTU task */
+    if (GKI_get_taskid() != BTU_TASK) {
+        /* post event to start timer in BTU task */
+        BTM_TRACE_WARNING("Posting oneshot timer event to btu_task");
+        BT_HDR *p_msg = (BT_HDR *)GKI_getbuf(BT_HDR_SIZE);
+        if (p_msg != NULL) {
+            p_msg->event = BT_EVT_TO_START_TIMER_ONESHOT;
+            GKI_send_msg (BTU_TASK, TASK_MBOX_0, p_msg);
         }
+    } else {
+        TIMER_LIST_ENT *tle = GKI_timer_getfirst(&btu_cb.timer_queue_oneshot);
+        GKI_start_timer(TIMER_3, tle->ticks, FALSE);
     }
-
-    if (first >= 0 && first < BTU_MAX_REG_TIMER)
-    {
-        btu_cb.timer_reg[first].timer_cb = timer_cb;
-        btu_cb.timer_reg[first].p_tle = p_tle;
-        btu_start_timer(p_tle, type, timeout);
-    }
-
+    GKI_enable();
 }
 
+void btu_stop_timer_oneshot(TIMER_LIST_ENT *p_tle) {
+    GKI_disable();
+    GKI_remove_from_timer_list(&btu_cb.timer_queue_oneshot, p_tle);
 
-void btu_deregister_timer(TIMER_LIST_ENT *p_tle)
-{
-    UINT8 i = 0;
-
-    for (; i < BTU_MAX_REG_TIMER; i++)
-    {
-        if (btu_cb.timer_reg[i].p_tle == p_tle)
-        {
-            btu_stop_timer(p_tle);
-            btu_cb.timer_reg[i].timer_cb = NULL;
-            btu_cb.timer_reg[i].p_tle = NULL;
-            break;
+    if (GKI_get_taskid() != BTU_TASK) {
+        /* post event to stop timer in BTU task */
+        BT_HDR *p_msg = (BT_HDR *)GKI_getbuf(BT_HDR_SIZE);
+        if (p_msg != NULL) {
+            p_msg->event = BT_EVT_TO_STOP_TIMER_ONESHOT;
+            GKI_send_msg (BTU_TASK, TASK_MBOX_0, p_msg);
+        }
+    } else {
+        if (GKI_timer_queue_is_empty(&btu_cb.timer_queue_oneshot)) {
+            BTM_TRACE_WARNING("Stopping oneshot timer");
+            GKI_stop_timer(TIMER_3);
+        } else {
+            BTM_TRACE_WARNING("Request to stop oneshot timer with non empty queue");
         }
     }
-}
-
-void btu_register_event_range (UINT16 start, tBTU_EVENT_CALLBACK event_cb)
-{
-    UINT8 i = 0;
-    INT8  first = -1;
-
-    for (; i < BTU_MAX_REG_EVENT; i++)
-    {
-        if (btu_cb.event_reg[i].event_cb == NULL && first < 0)
-            first = i;
-
-        if (btu_cb.event_reg[i].event_range == start)
-        {
-            btu_cb.event_reg[i].event_cb = event_cb;
-
-            if (!event_cb)
-                btu_cb.event_reg[i].event_range = 0;
-
-            first = -1;
-        }
-    }
-
-    /* if not deregistering && an empty index was found in range, register */
-    if (event_cb && first >= 0 && first < BTU_MAX_REG_EVENT)
-    {
-        btu_cb.event_reg[first].event_range = start;
-        btu_cb.event_reg[first].event_cb = event_cb;
-    }
-}
-
-
-void btu_deregister_event_range (UINT16 range)
-{
-    btu_register_event_range(range, NULL);
+    GKI_enable();
 }
 
 #if (defined(HCILP_INCLUDED) && HCILP_INCLUDED == TRUE)

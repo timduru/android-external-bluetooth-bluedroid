@@ -33,6 +33,7 @@
 #include "bta_hh_api.h"
 #include "bta_hh_int.h"
 #include "l2c_api.h"
+#include "utl.h"
 
 /*****************************************************************************
 **  Constants
@@ -62,11 +63,9 @@ void BTA_HhEnable(tBTA_SEC sec_mask, tBTA_HH_CBACK *p_cback)
     tBTA_HH_API_ENABLE *p_buf;
 
     /* register with BTA system manager */
-    GKI_sched_lock();
     bta_sys_register(BTA_ID_HH, &bta_hh_reg);
-    GKI_sched_unlock();
 
-    APPL_TRACE_ERROR0("Calling BTA_HhEnable");
+    APPL_TRACE_ERROR("Calling BTA_HhEnable");
     p_buf = (tBTA_HH_API_ENABLE *)GKI_getbuf((UINT16)sizeof(tBTA_HH_API_ENABLE));
 
     if (p_buf != NULL)
@@ -156,7 +155,7 @@ void BTA_HhOpen(BD_ADDR dev_bda, tBTA_HH_PROTO_MODE mode, tBTA_SEC sec_mask)
     }
     else
     {
-        APPL_TRACE_ERROR0("No resource to send HID host Connect request.");
+        APPL_TRACE_ERROR("No resource to send HID host Connect request.");
     }
 }
 
@@ -305,12 +304,13 @@ void BTA_HhSendCtrl(UINT8 dev_handle, tBTA_HH_TRANS_CTRL_TYPE c_type)
 *******************************************************************************/
 void BTA_HhSendData(UINT8 dev_handle, BD_ADDR dev_bda, BT_HDR  *p_data)
 {
+    UNUSED(dev_bda);
 #if (defined BTA_HH_LE_INCLUDED && BTA_HH_LE_INCLUDED == TRUE)
-        if (p_data->layer_specific != BTA_HH_RPTT_OUTPUT)
-        {
-            APPL_TRACE_ERROR0("ERROR! Wrong report type! Write Command only valid for output report!");
-            return;
-        }
+    if (p_data->layer_specific != BTA_HH_RPTT_OUTPUT)
+    {
+        APPL_TRACE_ERROR("ERROR! Wrong report type! Write Command only valid for output report!");
+        return;
+    }
 #endif
     bta_hh_snd_write_dev(dev_handle, HID_TRANS_DATA, (UINT8)p_data->layer_specific, 0, 0, p_data);
 }
@@ -482,7 +482,7 @@ void BTA_HhParseBootRpt(tBTA_HH_BOOT_RPT *p_data, UINT8 *p_report,
             break;
 
         default:
-            APPL_TRACE_DEBUG1("Unknown boot report: %d", p_report[0]);;
+            APPL_TRACE_DEBUG("Unknown boot report: %d", p_report[0]);;
             break;
         }
     }

@@ -128,6 +128,12 @@
 
 #define BT_EVT_TO_NFCCSIM_NCI       0x4a00      /* events to NFCC simulation (NCI packets) */
 
+/* start timer */
+#define BT_EVT_TO_START_TIMER_ONESHOT 0x4c00
+
+/* stop timer */
+#define BT_EVT_TO_STOP_TIMER_ONESHOT  0x4d00
+
 /* HCISU Events */
 
 #define BT_EVT_HCISU                0x5000
@@ -199,10 +205,11 @@
 */
 typedef struct
 {
-    UINT16          event;
-    UINT16          len;
-    UINT16          offset;
-    UINT16          layer_specific;
+    uint16_t          event;
+    uint16_t          len;
+    uint16_t          offset;
+    uint16_t          layer_specific;
+    uint8_t           data[];
 } BT_HDR;
 
 #define BT_HDR_SIZE (sizeof (BT_HDR))
@@ -496,6 +503,10 @@ typedef struct
 #define BLE_ADDR_RANDOM         0x01
 #define BLE_ADDR_TYPE_MASK      (BLE_ADDR_RANDOM | BLE_ADDR_PUBLIC)
 typedef UINT8 tBLE_ADDR_TYPE;
+
+#define BT_TRANSPORT_BR_EDR    1
+#define BT_TRANSPORT_LE        2
+typedef UINT8 tBT_TRANSPORT;
 
 #define BLE_ADDR_IS_STATIC(x)   ((x[0] & 0xC0) == 0xC0)
 
